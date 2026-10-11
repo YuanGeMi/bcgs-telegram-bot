@@ -14,7 +14,10 @@ export type WelcomeMediaType = (typeof MEDIA_TYPES)[number];
 
 export type WelcomeButton = { label: string; url: string };
 
-/** The admin-edited welcome for one language, as stored in SiteSetting `telegram_welcome_<locale>` (JSON). */
+/**
+ * The admin-edited welcome for one language, as stored in SiteSetting `telegram_welcome_<locale>` (JSON).
+ * `text` is the welcome message; `caption` is the media message's own caption (never the text).
+ */
 export type Welcome = {
   text: string;
   caption: string;
@@ -60,11 +63,12 @@ export function parseWelcome(stored: string | undefined): Welcome | null {
   const raw = json as Record<string, unknown>;
 
   const text = boundedText(raw.text, WELCOME_TEXT_MAX);
-  const caption = boundedText(raw.caption, WELCOME_CAPTION_MAX);
 
   const mediaUrl = httpsUrl(raw.mediaUrl);
   const mediaType = MEDIA_TYPES.find((type) => type === raw.mediaType);
   const media = mediaUrl && mediaType ? { url: mediaUrl, type: mediaType } : null;
+  // The caption belongs to the media message; without media there is nothing to put it on.
+  const caption = media ? boundedText(raw.caption, WELCOME_CAPTION_MAX) : '';
 
   const buttons: WelcomeButton[] = [];
   for (const item of Array.isArray(raw.buttons) ? raw.buttons : []) {

@@ -5,6 +5,8 @@ const en = {
   },
   app: {
     welcome: 'Welcome to BC.GS!',
+    /** Stands in for {name} / {full_name} in the admin welcome when the user has no name. */
+    nameFallback: 'there',
   },
   help: {
     private: 'Welcome to BC.GS! Find casino information, ratings, and reviews.\n\n/menu — Show the main menu buttons.\n/search — Search casinos by name, domain, or license.\n/review — Read a casino’s ratings and reviews.\n/rankings — See the top casinos overall or by category.\n/links — Get our website and community links.\n/complaint — Submit a complaint.\n/report — Report a scam.\n/language — Change the bot language.\n/help — Show this command list.',

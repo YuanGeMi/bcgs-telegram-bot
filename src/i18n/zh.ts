@@ -9,6 +9,7 @@ const zh: Messages = {
   },
   app: {
     welcome: '欢迎使用 BC.GS！',
+    nameFallback: '朋友',
   },
   help: {
     private: '欢迎使用 BC.GS！在这里查找娱乐场信息、评分和评测。\n\n/menu — 显示主菜单按钮。\n/search — 按名称、域名或牌照搜索娱乐场。\n/review — 查看娱乐场的评分和评测。\n/rankings — 查看综合或分类排名靠前的娱乐场。\n/links — 获取我们的网站和社区链接。\n/complaint — 提交投诉。\n/report — 举报诈骗。\n/language — 更改机器人语言。\n/help — 显示此命令列表。',

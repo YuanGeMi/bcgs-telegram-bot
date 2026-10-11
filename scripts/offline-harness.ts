@@ -7,7 +7,7 @@ process.env.ADMIN_CHAT_ID = '-1009999';
 
 type Row = Record<string, unknown>;
 export type Call = { method: string; payload: any };
-export type User = { id: number; language_code?: string };
+export type User = { id: number; language_code?: string; first_name?: string; last_name?: string; username?: string };
 
 const failures: string[] = [];
 export function check(name: string, condition: boolean, detail?: unknown): void {
@@ -174,12 +174,14 @@ const prismaStub: Record<string, Row> = {
 export const calls: Call[] = [];
 /** Telegram methods that answer with a 400 error, e.g. to simulate a rejected media URL. */
 export const failingMethods = new Set<string>();
+/** Message texts that answer with the same 400 error, to fail one message without failing every sendMessage. */
+export const failingTexts = new Set<string>();
 let messageId = 5000;
 const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
   const method = String(url).split('/').pop() ?? '';
   const payload = init?.body ? JSON.parse(String(init.body)) : {};
   calls.push({ method, payload });
-  if (failingMethods.has(method)) {
+  if (failingMethods.has(method) || (typeof payload.text === 'string' && failingTexts.has(payload.text))) {
     return new Response(JSON.stringify({
       ok: false, error_code: 400, description: 'Bad Request: wrong file identifier/HTTP URL specified',
     }));
@@ -196,7 +198,12 @@ const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
 let updateId = 1;
 
 function fromOf(user: User) {
-  return { id: user.id, is_bot: false, first_name: 'Tester', ...(user.language_code ? { language_code: user.language_code } : {}) };
+  return {
+    id: user.id, is_bot: false, first_name: user.first_name ?? 'Tester',
+    ...(user.last_name ? { last_name: user.last_name } : {}),
+    ...(user.username ? { username: user.username } : {}),
+    ...(user.language_code ? { language_code: user.language_code } : {}),
+  };
 }
 function chatOf(user: User, chatType: string) {
   return chatType === 'private'

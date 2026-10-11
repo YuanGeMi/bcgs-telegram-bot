@@ -2,7 +2,7 @@
 // Prisma and Telegram are both stubbed, so nothing reaches the database or Telegram.
 // Run with: node --import tsx scripts/test-welcome.ts
 import {
-  advanceMinutes, calls, check, createOfflineBot, db, failingMethods, finish, settings, siteSettings, tapUpdate, texts,
+  advanceMinutes, calls, check, createOfflineBot, db, failingMethods, failingTexts, finish, settings, siteSettings, tapUpdate, texts,
   textUpdate, type Call, type User,
 } from './offline-harness';
 
@@ -70,63 +70,153 @@ import {
   check('three buttons: one per row, in order', JSON.stringify(inline(out[0])?.map((row) => row.map((b) => b.text))) ===
     JSON.stringify([['Button 1'], ['Button 2'], ['Button 3']]), inline(out[0]));
 
-  console.log('\n== Each media type with a short text ==');
-  for (const [url, method] of [[PHOTO, 'sendPhoto'], [GIF, 'sendAnimation'], [MEDIA, 'sendVideo']] as const) {
-    const type = method === 'sendPhoto' ? 'photo' : method === 'sendAnimation' ? 'animation' : 'video';
-    setWelcome('en', welcome({ text: 'Short welcome', mediaUrl: url, mediaType: type, buttons: [button(1)] }));
+  const MEDIA_CASES = [[PHOTO, 'sendPhoto', 'photo'], [GIF, 'sendAnimation', 'animation'], [MEDIA, 'sendVideo', 'video']] as const;
+
+  console.log('\n== Both set: welcome text, then media with its own caption ==');
+  for (const [url, method, type] of MEDIA_CASES) {
+    setWelcome('en', welcome({ text: 'Short welcome', caption: 'Look at this', mediaUrl: url, mediaType: type, buttons: [button(1)] }));
     out = sent(await start(enUser));
-    const field = type;
-    check(`${type}: one ${method} with the text as caption and the buttons, then the follow-up`,
-      out.length === 2 && out[0].method === method && out[0].payload[field] === url && out[0].payload.caption === 'Short welcome' &&
-      inline(out[0])?.length === 1 && out[1].payload.text === en.keyboard.ready && hasReplyKeyboard(out[1]), out);
+    check(`${type}: text first, alone (no keyboard, no buttons)`,
+      out[0]?.method === 'sendMessage' && out[0].payload.text === 'Short welcome' && out[0].payload.reply_markup === undefined, out[0]);
+    check(`${type}: then ${method} with its own caption and the buttons (last welcome message)`,
+      out[1]?.method === method && out[1].payload[type] === url && out[1].payload.caption === 'Look at this' && inline(out[1])?.length === 1, out[1]);
+    check(`${type}: then the follow-up with the bottom keyboard`,
+      out.length === 3 && out[2].payload.text === en.keyboard.ready && hasReplyKeyboard(out[2]) && !inline(out[2]), out.map((c) => c.method));
   }
 
-  setWelcome('en', welcome({ text: 'Main text', caption: 'Caption wins', mediaUrl: PHOTO, mediaType: 'photo' }));
+  setWelcome('en', welcome({ text: 'Main text', caption: 'Photo caption', mediaUrl: PHOTO, mediaType: 'photo' }));
   out = sent(await start(enUser));
-  check('caption set: media uses the caption; zero buttons so the keyboard rides on it',
-    out.length === 1 && out[0].method === 'sendPhoto' && out[0].payload.caption === 'Caption wins' && hasReplyKeyboard(out[0]), out);
+  check('both set, zero buttons: text alone, then the photo with the bottom keyboard, no follow-up',
+    out.length === 2 && out[0].payload.text === 'Main text' && out[0].payload.reply_markup === undefined &&
+    out[1].method === 'sendPhoto' && out[1].payload.caption === 'Photo caption' && hasReplyKeyboard(out[1]), out);
 
-  setWelcome('en', welcome({ text: 'x'.repeat(1024), mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
+  setWelcome('en', welcome({ text: 'Only the text', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
   out = sent(await start(enUser));
-  check('text of exactly 1024: still one media message', out[0].method === 'sendPhoto' && out[0].payload.caption.length === 1024 && out.length === 2);
+  check('caption empty: the photo has no caption; the welcome text is never reused as caption',
+    out[1]?.method === 'sendPhoto' && out[1].payload.caption === undefined && out[0].payload.text === 'Only the text', out);
 
   const long = `Start. ${'Long welcome text. '.repeat(100)}End.`;
   setWelcome('en', welcome({ text: long, mediaUrl: MEDIA, mediaType: 'video', buttons: [button(1), button(2)] }));
   out = sent(await start(enUser));
-  check('text over 1024, no caption: media alone (no caption, no keyboard)',
-    out[0]?.method === 'sendVideo' && out[0].payload.caption === undefined && out[0].payload.reply_markup === undefined, out[0]);
-  check('...then the full text, uncut, with the buttons', out[1]?.payload.text === long && long.length > 1024 && inline(out[1])?.length === 2);
-  check('...then the follow-up with the bottom keyboard', out.length === 3 && out[2].payload.text === en.keyboard.ready && hasReplyKeyboard(out[2]));
+  check('text over 1024 with media: full text uncut, then the video with both buttons, then the follow-up',
+    out.length === 3 && out[0].payload.text === long && long.length > 1024 && out[1].method === 'sendVideo' &&
+    inline(out[1])?.length === 2 && out[2].payload.text === en.keyboard.ready, out.map((c) => c.method));
 
-  setWelcome('en', welcome({ text: long, mediaUrl: MEDIA, mediaType: 'video' }));
+  console.log('\n== Only media ==');
+  setWelcome('en', welcome({ caption: 'Just a caption', mediaUrl: GIF, mediaType: 'animation', buttons: [button(1)] }));
   out = sent(await start(enUser));
-  check('long text, zero buttons: media alone, then text with the bottom keyboard, no follow-up',
-    out.length === 2 && out[0].payload.reply_markup === undefined && out[1].payload.text === long && hasReplyKeyboard(out[1]), out);
-
+  check('media + caption + button: one animation with caption and buttons, then the follow-up',
+    out.length === 2 && out[0].method === 'sendAnimation' && out[0].payload.caption === 'Just a caption' && inline(out[0])?.length === 1 &&
+    out[1].payload.text === en.keyboard.ready && hasReplyKeyboard(out[1]), out);
   setWelcome('en', welcome({ mediaUrl: PHOTO, mediaType: 'photo' }));
   out = sent(await start(enUser));
-  check('media only: photo without caption, keyboard on it', out.length === 1 && out[0].method === 'sendPhoto' &&
+  check('media, no caption, no buttons: photo without caption, keyboard on it', out.length === 1 && out[0].method === 'sendPhoto' &&
     out[0].payload.caption === undefined && hasReplyKeyboard(out[0]), out);
+
+  console.log('\n== Only welcome: buttons on the text ==');
+  setWelcome('en', welcome({ text: 'Text only', caption: 'Orphan caption', buttons: [button(1)] }));
+  out = sent(await start(enUser));
+  check('caption without media is ignored: one text message with the buttons, then the follow-up',
+    out.length === 2 && out[0].payload.text === 'Text only' && inline(out[0])?.length === 1 &&
+    !out.some((c) => c.payload.text === 'Orphan caption' || c.payload.caption) && out[1].payload.text === en.keyboard.ready, out);
 
   console.log('\n== Media send fails ==');
   const warnings: string[] = [];
   const realWarn = console.warn;
   console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')); };
   failingMethods.add('sendPhoto');
-  setWelcome('en', welcome({ text: 'Fallback text', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
-  out = sent(await start(enUser));
-  check('photo rejected: text with the buttons instead, then the follow-up',
-    out.length === 3 && out[0].method === 'sendPhoto' && out[1].payload.text === 'Fallback text' && inline(out[1])?.length === 1 &&
-    out[2].payload.text === en.keyboard.ready, out.map((c) => c.method));
+  setWelcome('en', welcome({ text: 'Delivered first', caption: 'Lost caption', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
+  at = await start(enUser);
+  out = sent(at);
+  const edits = calls.slice(at).filter((c) => c.method === 'editMessageReplyMarkup');
+  check('the welcome text was delivered before the photo was tried',
+    out[0]?.method === 'sendMessage' && out[0].payload.text === 'Delivered first' && out[1]?.method === 'sendPhoto', out.map((c) => c.method));
+  check('the buttons are moved onto the delivered text (now the last welcome message)',
+    edits.length === 1 && edits[0].payload.chat_id === enUser.id && typeof edits[0].payload.message_id === 'number' &&
+    JSON.stringify(edits[0].payload.reply_markup?.inline_keyboard) === JSON.stringify([[{ text: 'Button 1', url: 'https://t.me/bcgs1' }]]), edits);
+  check('then the follow-up with the bottom keyboard, and nothing else',
+    out.length === 3 && out[2].payload.text === en.keyboard.ready && hasReplyKeyboard(out[2]), out.map((c) => c.method));
   check('a short warning was logged, without the URL', warnings.length === 1 && warnings[0].includes('photo') &&
     warnings[0].includes('400') && !warnings[0].includes('supabase') && !warnings[0].includes('http'), warnings);
 
-  setWelcome('en', welcome({ mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
+  setWelcome('en', welcome({ text: 'No buttons here', mediaUrl: PHOTO, mediaType: 'photo' }));
+  at = await start(enUser);
+  out = sent(at);
+  check('zero buttons: text, failed photo, then the follow-up carries the bottom keyboard; no edit',
+    out.length === 3 && out[0].payload.text === 'No buttons here' && out[2].payload.text === en.keyboard.ready && hasReplyKeyboard(out[2]) &&
+    !calls.slice(at).some((c) => c.method === 'editMessageReplyMarkup'), out.map((c) => c.method));
+
+  failingMethods.add('editMessageReplyMarkup');
+  setWelcome('en', welcome({ text: 'Edit fails too', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
   out = sent(await start(enUser));
-  check('media-only welcome rejected: built-in welcome instead', out.at(-1)?.payload.text === en.help.private &&
+  check('photo and the button edit both fail: the handler carries on, text and follow-up still sent',
+    out[0]?.payload.text === 'Edit fails too' && out.at(-1)?.payload.text === en.keyboard.ready, out.map((c) => c.method));
+  failingMethods.delete('editMessageReplyMarkup');
+
+  setWelcome('en', welcome({ caption: 'Lonely', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
+  out = sent(await start(enUser));
+  check('media-only welcome rejected: built-in welcome instead, /start is never silent', out.at(-1)?.payload.text === en.help.private &&
     hasReplyKeyboard(out.at(-1)) && !out.some((c) => c.payload.text === en.keyboard.ready), out.map((c) => c.method));
+
   failingMethods.clear();
+  failingTexts.add('Text fails');
+  setWelcome('en', welcome({ text: 'Text fails', caption: 'Media works', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
+  at = await start(enUser);
+  const photo = calls.slice(at).find((c) => c.method === 'sendPhoto');
+  check('text fails but media works: the photo still goes out with its caption and the buttons, then the follow-up',
+    photo?.payload.caption === 'Media works' && inline(photo)?.length === 1 && sent(at).at(-1)?.payload.text === en.keyboard.ready, photo);
+  failingTexts.clear();
   console.warn = realWarn;
+
+  console.log('\n== Placeholders ==');
+  const { renderWelcomeTemplate } = await import('../src/services/welcome-placeholders');
+  const ana = { firstName: 'Ana', lastName: 'Silva', username: 'ana_s' };
+  const noUser = { firstName: 'Ana', lastName: 'Silva' };
+  const r = (template: string, user: Parameters<typeof renderWelcomeTemplate>[1], max = 4096) =>
+    renderWelcomeTemplate(template, user, 'there', max);
+  for (const [template, user, expected] of [
+    ['Hi {name} ({full_name}) {username}!', ana, 'Hi Ana (Ana Silva) @ana_s!'],
+    ['Hi @{username}', ana, 'Hi @ana_s'],
+    ['Hi {name} {username}!', noUser, 'Hi Ana!'],
+    ['Hello, {username}!', noUser, 'Hello!'],
+    ['Hi {username}, welcome', noUser, 'Hi, welcome'],
+    ['{username} welcome', noUser, 'welcome'],
+    ['Hi @{username} and welcome', noUser, 'Hi and welcome'],
+    ['Contact ({username}) now', noUser, 'Contact now'],
+    ['Line one\n{username}\nLine three', noUser, 'Line one\n\nLine three'],
+    ['Hi {name}, {full_name}', { firstName: '', lastName: '' }, 'Hi there, there'],
+    ['Hi {name}, {full_name}', { firstName: '   ' }, 'Hi there, there'],
+    ['{full_name}', { firstName: 'Ana' }, 'Ana'],
+    ['Hi {name}', { firstName: '<b>Bold</b> *x* [link](https://evil.example) _u_ `c`' }, 'Hi <b>Bold</b> *x* [link](https://evil.example) _u_ `c`'],
+    ['Hi {name}!', { firstName: 'A\u202Eevil\u0000\u200B' }, 'Hi Aevil!'],
+    ['Hi {name}', { firstName: '{username}', username: 'ana_s' }, 'Hi {username}'],
+    ['Hi {username}!', { firstName: 'Ana', username: 'bad name!' }, 'Hi!'],
+    ['Hi {nickname} {NAME} {name', ana, 'Hi {nickname} {NAME} {name'],
+  ] as const) {
+    const got = r(template, user);
+    check(`${JSON.stringify(template)} → ${JSON.stringify(expected)}`, got === expected, got);
+  }
+  const template4096 = `${'x'.repeat(4080)} {full_name}`;
+  const longText = r(template4096, { firstName: 'Ana', lastName: 'Silva-Montenegro' });
+  check('template fits, but the filled text is over 4096: cut to ≤ 4096 with "…"', template4096.length <= 4096 &&
+    longText.length <= 4096 && longText.length >= 4090 && longText.endsWith('…') && longText.includes(' Ana'), longText.length);
+  const longCaption = r(`${'y'.repeat(1018)}{name}`, { firstName: 'Anastasia' }, 1024);
+  check('caption cut to ≤ 1024 after substitution', longCaption.length === 1024 && longCaption.endsWith('…') &&
+    longCaption.includes('Anast'), longCaption.length);
+  const emoji = r(`${'a'.repeat(1022)}😀😀`, ana, 1024);
+  check('cut never splits an emoji', emoji.length <= 1024 && !/[\uD800-\uDBFF]…$/.test(emoji) && emoji.endsWith('…'), emoji.slice(-4));
+  check('short text is not touched', r('Hi {name}', ana) === 'Hi Ana');
+
+  setWelcome('en', welcome({ text: 'Hi {name} {username}!', caption: 'For {full_name}', mediaUrl: PHOTO, mediaType: 'photo' }));
+  const named: User = { id: 2001, language_code: 'en', first_name: 'Ana *bold*', last_name: '[x](https://evil.example)', username: 'ana_s' };
+  out = sent(await start(named));
+  check('/start fills placeholders in the text and the caption', out[0]?.payload.text === 'Hi Ana *bold* @ana_s!' &&
+    out[1]?.payload.caption === 'For Ana *bold* [x](https://evil.example)', out.map((c) => c.payload.text ?? c.payload.caption));
+  check('...sent as plain text: no parse_mode, no entities', out.every((c) => c.payload.parse_mode === undefined &&
+    c.payload.entities === undefined && c.payload.caption_entities === undefined));
+  out = sent(await start({ id: 2001, language_code: 'en', first_name: '' }));
+  check('no name, no username: fallback word and no dangling "@"', out[0]?.payload.text === 'Hi there!' &&
+    out[1]?.payload.caption === 'For there', out.map((c) => c.payload.text ?? c.payload.caption));
 
   console.log('\n== Invalid values ==');
   const parse = (value: unknown) => parseWelcome(typeof value === 'string' ? value : JSON.stringify(value));
@@ -168,6 +258,24 @@ import {
   setWelcome('en', undefined);
   out = sent(await start(zhUser));
   check('Chinese and English not set: Chinese built-in welcome', out.length === 1 && out[0].payload.text === zh.help.private);
+
+  setWelcome('en', welcome({ text: 'Hello {name}' }));
+  setWelcome('zh', welcome({ text: '你好，{name}' }));
+  setWelcome('th', welcome({ text: 'สวัสดี{name}' }));
+  for (const [user, expected] of [
+    [{ id: 2001, language_code: 'en', first_name: '' }, `Hello ${en.app.nameFallback}`],
+    [{ id: 2002, language_code: 'en', first_name: '' }, `你好，${zh.app.nameFallback}`],
+    [{ id: 2003, language_code: 'en', first_name: '' }, `สวัสดี${th.app.nameFallback}`],
+  ] as const) {
+    out = sent(await start(user));
+    check(`no name: fallback word in the user's language → ${JSON.stringify(expected)}`, out[0]?.payload.text === expected, out[0]?.payload.text);
+  }
+  setWelcome('zh', undefined);
+  out = sent(await start({ id: 2002, language_code: 'en', first_name: '' }));
+  check('Chinese falls back to the English welcome, with the Chinese fallback word', out[0]?.payload.text === `Hello ${zh.app.nameFallback}`,
+    out[0]?.payload.text);
+  setWelcome('en', undefined);
+  setWelcome('th', undefined);
 
   console.log('\n== Cache ==');
   clearAll();
