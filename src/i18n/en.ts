@@ -7,9 +7,11 @@ const en = {
     welcome: 'Welcome to BC.GS!',
     /** Stands in for {name} / {full_name} in the admin welcome when the user has no name. */
     nameFallback: 'there',
-    /** Sent before an admin welcome that has inline buttons, carrying the bottom keyboard. */
+    /** Carries the bottom keyboard when the admin welcome has inline buttons but no text. */
     greeting: 'Welcome {name}',
     greetingNoName: 'Welcome',
+    /** Carries the admin welcome's inline buttons when there is no media to put them on. */
+    welcomeButtons: 'Useful links 👇',
   },
   help: {
     private: 'Welcome to BC.GS! Find casino information, ratings, and reviews.\n\n/menu — Show the main menu buttons.\n/search — Search casinos by name, domain, or license.\n/review — Read a casino’s ratings and reviews.\n/rankings — See the top casinos overall or by category.\n/links — Get our website and community links.\n/complaint — Submit a complaint.\n/report — Report a scam.\n/language — Change the bot language.\n/help — Show this command list.',

@@ -28,69 +28,64 @@ function sendMedia(
   return ctx.replyWithVideo(media.url, other);
 }
 
-/** "Welcome Ana" with the bottom keyboard, as plain text. A failure is logged and never blocks the welcome. */
-async function sendGreeting(ctx: BotContext, locale: Locale): Promise<void> {
-  const name = Array.from(cleanName(ctx.from?.first_name)).slice(0, GREETING_NAME_MAX).join('').trimEnd();
-  const text = name ? t('app.greeting', { name }, locale) : t('app.greetingNoName', {}, locale);
+/** Runs one send; a failure is logged as a short warning and reported as false, never thrown. */
+async function trySend(label: string, locale: Locale, send: () => Promise<unknown>): Promise<boolean> {
   try {
-    await ctx.reply(text, { reply_markup: mainKeyboard(locale) });
+    await send();
+    return true;
   } catch (error) {
-    console.warn(`Welcome greeting (${locale}) could not be sent: ${describeError(error)}`);
+    console.warn(`Welcome ${label} (${locale}) could not be sent: ${describeError(error)}`);
+    return false;
   }
+}
+
+/** "Welcome Ana", the keyboard carrier when the admin welcome has buttons but no text. */
+function greetingText(ctx: BotContext, locale: Locale): string {
+  const name = Array.from(cleanName(ctx.from?.first_name)).slice(0, GREETING_NAME_MAX).join('').trimEnd();
+  return name ? t('app.greeting', { name }, locale) : t('app.greetingNoName', {}, locale);
 }
 
 type CustomWelcomeResult = { sent: false } | { sent: true; keyboardMissing: boolean };
 
 /**
- * Sends the admin-edited welcome as plain text (no parse mode), in up to two messages:
- * the welcome text, then the media with its own caption. The inline buttons, or the bottom
- * keyboard when there are none, go on the last message actually sent. With inline buttons,
- * the bottom keyboard goes on a short greeting sent before the welcome instead.
+ * Sends the admin-edited welcome as plain text (no parse mode). One keyboard fits on a message, so:
+ * - no inline buttons: the welcome text, then the media with its caption; the bottom keyboard rides
+ *   on the last message sent.
+ * - inline buttons: the welcome text (or, without text, a short greeting) carries the bottom keyboard,
+ *   then the media carries the caption and the buttons. Without media, or if it fails, a short
+ *   "links" message carries the buttons.
  */
 async function sendCustomWelcome(ctx: BotContext, welcome: Welcome, locale: Locale): Promise<CustomWelcomeResult> {
   const user = { firstName: ctx.from?.first_name, lastName: ctx.from?.last_name, username: ctx.from?.username };
   const fallbackName = t('app.nameFallback', {}, locale);
   const text = welcome.text ? renderWelcomeTemplate(welcome.text, user, fallbackName, WELCOME_TEXT_MAX) : '';
   const caption = welcome.caption ? renderWelcomeTemplate(welcome.caption, user, fallbackName, WELCOME_CAPTION_MAX) : '';
+  const keyboard = mainKeyboard(locale);
+  const media = welcome.media;
 
-  const inline = welcome.buttons.length
-    ? InlineKeyboard.from(welcome.buttons.map((button) => [InlineKeyboard.url(button.label, button.url)]))
-    : null;
-  // One keyboard per message: without inline buttons the bottom keyboard rides on the last welcome message.
-  const markup = inline ?? mainKeyboard(locale);
-  if (inline) await sendGreeting(ctx, locale);
-
-  let textMessageId: number | null = null;
-  if (text) {
-    try {
-      const message = await ctx.reply(text, welcome.media ? {} : { reply_markup: markup });
-      textMessageId = message.message_id;
-    } catch (error) {
-      console.warn(`Welcome text (${locale}) could not be sent: ${describeError(error)}`);
+  if (!welcome.buttons.length) {
+    const textSent = text
+      ? await trySend('text', locale, () => ctx.reply(text, media ? {} : { reply_markup: keyboard }))
+      : false;
+    if (!media) return textSent ? { sent: true, keyboardMissing: false } : { sent: false };
+    if (await trySend(media.type, locale, () => sendMedia(ctx, media, caption, keyboard))) {
+      return { sent: true, keyboardMissing: false };
     }
+    return textSent ? { sent: true, keyboardMissing: true } : { sent: false };
   }
 
-  if (!welcome.media) {
-    return textMessageId === null ? { sent: false } : { sent: true, keyboardMissing: false };
-  }
+  const inline = InlineKeyboard.from(welcome.buttons.map((button) => [InlineKeyboard.url(button.label, button.url)]));
+  let textSent = false;
+  if (text) textSent = await trySend('text', locale, () => ctx.reply(text, { reply_markup: keyboard }));
+  else await trySend('greeting', locale, () => ctx.reply(greetingText(ctx, locale), { reply_markup: keyboard }));
 
-  try {
-    await sendMedia(ctx, welcome.media, caption, markup);
+  if (media && (await trySend(media.type, locale, () => sendMedia(ctx, media, caption, inline)))) {
     return { sent: true, keyboardMissing: false };
-  } catch (error) {
-    console.warn(`Welcome ${welcome.media.type} (${locale}) could not be sent: ${describeError(error)}`);
   }
-
-  if (textMessageId === null || !ctx.chat) return { sent: false };
-  // The media failed after the text went out: the text is now the last message, so the buttons move onto it.
-  // Only inline keyboards can be added by editing; without a greeting the bottom keyboard needs the follow-up message.
-  if (!inline) return { sent: true, keyboardMissing: true };
-  try {
-    await ctx.api.editMessageReplyMarkup(ctx.chat.id, textMessageId, { reply_markup: inline });
-  } catch (error) {
-    console.warn(`Welcome buttons (${locale}) could not be added to the text: ${describeError(error)}`);
-  }
-  return { sent: true, keyboardMissing: false };
+  // Media-only welcome whose media failed: the built-in welcome stands in, as before.
+  if (!text) return { sent: false };
+  const buttonsSent = await trySend('buttons', locale, () => ctx.reply(t('app.welcomeButtons', {}, locale), { reply_markup: inline }));
+  return textSent || buttonsSent ? { sent: true, keyboardMissing: false } : { sent: false };
 }
 
 /** Private-chat welcome: the admin-edited one when set, otherwise the built-in help with the bottom keyboard. */

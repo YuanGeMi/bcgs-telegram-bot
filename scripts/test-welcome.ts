@@ -26,8 +26,13 @@ import {
   const button = (n: number) => ({ label: `Button ${n}`, url: `https://t.me/bcgs${n}` });
   /** The harness names every user "Tester" unless the test sets first_name. */
   const GREET = 'Welcome Tester';
-  const isGreeting = (c: Call | undefined, text = GREET) =>
+  /** A plain-text message carrying the bottom keyboard (and no inline buttons). */
+  const isKeyboardText = (c: Call | undefined, text: string) =>
     c?.method === 'sendMessage' && c.payload.text === text && hasReplyKeyboard(c) && !inline(c) && c.payload.parse_mode === undefined;
+  const isGreeting = (c: Call | undefined, text = GREET) => isKeyboardText(c, text);
+  /** The short message that carries the inline buttons when there is no media for them. */
+  const isLinks = (c: Call | undefined, buttons: number, text: string = en.app.welcomeButtons) =>
+    c?.method === 'sendMessage' && c.payload.text === text && inline(c)?.length === buttons && !hasReplyKeyboard(c);
   const noGreeting = (out: Call[]) => !out.some((c) => typeof c.payload.text === 'string' && /^(Welcome|欢迎|ยินดีต้อนรับ)( .*)?$/.test(c.payload.text));
   const noFollowUp = (out: Call[]) => !out.some((c) => [en.keyboard.ready, zh.keyboard.ready, th.keyboard.ready].includes(c.payload.text));
 
@@ -67,9 +72,10 @@ import {
 
   setWelcome('en', welcome({ text: 'Hi', buttons: [button(1)] }));
   out = sent(await start(enUser));
-  check('one button: greeting with the bottom keyboard first', isGreeting(out[0]), out[0]);
-  check('...then the welcome with one URL button and no bottom keyboard, and nothing after it',
-    out.length === 2 && out[1].payload.text === 'Hi' && !hasReplyKeyboard(out[1]) &&
+  check('text + button, no media: the welcome text is first and carries the bottom keyboard; no greeting', isKeyboardText(out[0], 'Hi') &&
+    noGreeting(out), out[0]);
+  check('...then the short links message carries the URL button, and nothing after it',
+    out.length === 2 && isLinks(out[1], 1) &&
     JSON.stringify(inline(out[1])) === JSON.stringify([[{ text: 'Button 1', url: 'https://t.me/bcgs1' }]]) && noFollowUp(out), out);
 
   setWelcome('en', welcome({ text: 'Hi', buttons: [button(1), button(2), button(3)] }));
@@ -77,18 +83,23 @@ import {
   check('three buttons: one per row, in order', JSON.stringify(inline(out[1])?.map((row) => row.map((b) => b.text))) ===
     JSON.stringify([['Button 1'], ['Button 2'], ['Button 3']]), inline(out[1]));
 
+  setWelcome('en', welcome({ text: 'Hi {name} {username}!', buttons: [button(1)] }));
+  out = sent(await start({ id: 2001, language_code: 'en', first_name: 'Ana', username: 'ana_s' }));
+  check('placeholders filled in the first message, which carries the keyboard', isKeyboardText(out[0], 'Hi Ana @ana_s!'), out[0]?.payload.text);
+  out = sent(await start({ id: 2001, language_code: 'en', first_name: '' }));
+  check('...missing name and username use the existing rules', isKeyboardText(out[0], 'Hi there!'), out[0]?.payload.text);
+
   const MEDIA_CASES = [[PHOTO, 'sendPhoto', 'photo'], [GIF, 'sendAnimation', 'animation'], [MEDIA, 'sendVideo', 'video']] as const;
 
   console.log('\n== Both set: welcome text, then media with its own caption ==');
   for (const [url, method, type] of MEDIA_CASES) {
     setWelcome('en', welcome({ text: 'Short welcome', caption: 'Look at this', mediaUrl: url, mediaType: type, buttons: [button(1)] }));
     out = sent(await start(enUser));
-    check(`${type}: greeting with the bottom keyboard first`, isGreeting(out[0]), out[0]);
-    check(`${type}: then the text, alone (no keyboard, no buttons)`,
-      out[1]?.method === 'sendMessage' && out[1].payload.text === 'Short welcome' && out[1].payload.reply_markup === undefined, out[1]);
+    check(`${type}: the welcome text first, carrying the bottom keyboard; no greeting`,
+      isKeyboardText(out[0], 'Short welcome') && noGreeting(out), out[0]);
     check(`${type}: then ${method} with its own caption and the buttons, and nothing after it`,
-      out.length === 3 && out[2].method === method && out[2].payload[type] === url && out[2].payload.caption === 'Look at this' &&
-      inline(out[2])?.length === 1 && !hasReplyKeyboard(out[2]), out.map((c) => c.method));
+      out.length === 2 && out[1].method === method && out[1].payload[type] === url && out[1].payload.caption === 'Look at this' &&
+      inline(out[1])?.length === 1 && !hasReplyKeyboard(out[1]) && noFollowUp(out), out.map((c) => c.method));
   }
 
   setWelcome('en', welcome({ text: 'Main text', caption: 'Photo caption', mediaUrl: PHOTO, mediaType: 'photo' }));
@@ -100,19 +111,19 @@ import {
   setWelcome('en', welcome({ text: 'Only the text', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
   out = sent(await start(enUser));
   check('caption empty: the photo has no caption; the welcome text is never reused as caption',
-    isGreeting(out[0]) && out[1]?.payload.text === 'Only the text' && out[2]?.method === 'sendPhoto' && out[2].payload.caption === undefined, out);
+    isKeyboardText(out[0], 'Only the text') && out[1]?.method === 'sendPhoto' && out[1].payload.caption === undefined, out);
 
   const long = `Start. ${'Long welcome text. '.repeat(100)}End.`;
   setWelcome('en', welcome({ text: long, mediaUrl: MEDIA, mediaType: 'video', buttons: [button(1), button(2)] }));
   out = sent(await start(enUser));
-  check('text over 1024 with media: greeting, full text uncut, then the video with both buttons, nothing after',
-    out.length === 3 && isGreeting(out[0]) && out[1].payload.text === long && long.length > 1024 && out[2].method === 'sendVideo' &&
-    inline(out[2])?.length === 2, out.map((c) => c.method));
+  check('text over 1024 with media: full text uncut with the keyboard, then the video with both buttons, nothing after',
+    out.length === 2 && isKeyboardText(out[0], long) && long.length > 1024 && out[1].method === 'sendVideo' &&
+    inline(out[1])?.length === 2, out.map((c) => c.method));
 
   console.log('\n== Only media ==');
   setWelcome('en', welcome({ caption: 'Just a caption', mediaUrl: GIF, mediaType: 'animation', buttons: [button(1)] }));
   out = sent(await start(enUser));
-  check('media + caption + button: greeting, then one animation with caption and buttons, nothing after',
+  check('no text, media + caption + button: the greeting carries the keyboard, then the animation with caption and buttons, nothing after',
     out.length === 2 && isGreeting(out[0]) && out[1].method === 'sendAnimation' && out[1].payload.caption === 'Just a caption' &&
     inline(out[1])?.length === 1, out);
   setWelcome('en', welcome({ mediaUrl: PHOTO, mediaType: 'photo' }));
@@ -120,11 +131,11 @@ import {
   check('media, no caption, no buttons: no greeting, photo without caption, keyboard on it', out.length === 1 && out[0].method === 'sendPhoto' &&
     out[0].payload.caption === undefined && hasReplyKeyboard(out[0]), out);
 
-  console.log('\n== Only welcome: buttons on the text ==');
+  console.log('\n== Only welcome ==');
   setWelcome('en', welcome({ text: 'Text only', caption: 'Orphan caption', buttons: [button(1)] }));
   out = sent(await start(enUser));
-  check('caption without media is ignored: greeting, then one text message with the buttons, nothing after',
-    out.length === 2 && isGreeting(out[0]) && out[1].payload.text === 'Text only' && inline(out[1])?.length === 1 &&
+  check('caption without media is ignored: text with the keyboard, then the links message with the buttons, nothing after',
+    out.length === 2 && isKeyboardText(out[0], 'Text only') && isLinks(out[1], 1) &&
     !out.some((c) => c.payload.text === 'Orphan caption' || c.payload.caption), out);
 
   console.log('\n== Media send fails ==');
@@ -135,14 +146,12 @@ import {
   setWelcome('en', welcome({ text: 'Delivered first', caption: 'Lost caption', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
   at = await start(enUser);
   out = sent(at);
-  const edits = calls.slice(at).filter((c) => c.method === 'editMessageReplyMarkup');
-  check('greeting, then the welcome text, both delivered before the photo was tried',
-    isGreeting(out[0]) && out[1]?.payload.text === 'Delivered first' && out[2]?.method === 'sendPhoto', out.map((c) => c.method));
-  check('the buttons are moved onto the delivered text (now the last welcome message)',
-    edits.length === 1 && edits[0].payload.chat_id === enUser.id && typeof edits[0].payload.message_id === 'number' &&
-    JSON.stringify(edits[0].payload.reply_markup?.inline_keyboard) === JSON.stringify([[{ text: 'Button 1', url: 'https://t.me/bcgs1' }]]), edits);
-  check('nothing sent after the failed photo (the greeting already carries the bottom keyboard)',
-    out.length === 3 && noFollowUp(out), out.map((c) => c.method));
+  check('the welcome text, with the keyboard, was delivered before the photo was tried',
+    isKeyboardText(out[0], 'Delivered first') && out[1]?.method === 'sendPhoto', out.map((c) => c.method));
+  check('the buttons go out on the links message instead (text and buttons), nothing after it',
+    out.length === 3 && isLinks(out[2], 1) && noFollowUp(out) && noGreeting(out) &&
+    JSON.stringify(inline(out[2])) === JSON.stringify([[{ text: 'Button 1', url: 'https://t.me/bcgs1' }]]), out.map((c) => c.method));
+  check('no edit is attempted', !calls.slice(at).some((c) => c.method === 'editMessageReplyMarkup'));
   check('a short warning was logged, without the URL', warnings.length === 1 && warnings[0].includes('photo') &&
     warnings[0].includes('400') && !warnings[0].includes('supabase') && !warnings[0].includes('http'), warnings);
 
@@ -153,37 +162,43 @@ import {
     out.length === 3 && out[0].payload.text === 'No buttons here' && out[2].payload.text === en.keyboard.ready && hasReplyKeyboard(out[2]) &&
     !calls.slice(at).some((c) => c.method === 'editMessageReplyMarkup'), out.map((c) => c.method));
 
-  failingMethods.add('editMessageReplyMarkup');
-  setWelcome('en', welcome({ text: 'Edit fails too', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
+  failingTexts.add(en.app.welcomeButtons);
+  setWelcome('en', welcome({ text: 'Links fail too', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
   out = sent(await start(enUser));
-  check('photo and the button edit both fail: the handler carries on, greeting and text sent, nothing after',
-    isGreeting(out[0]) && out[1]?.payload.text === 'Edit fails too' && out.at(-1)?.method === 'sendPhoto' && noFollowUp(out),
+  check('photo and the links message both fail: the handler carries on, the text is still delivered, nothing after',
+    isKeyboardText(out[0], 'Links fail too') && out.length === 3 && noFollowUp(out) && !out.some((c) => c.payload.text === en.help.private),
     out.map((c) => c.method));
-  failingMethods.delete('editMessageReplyMarkup');
+  failingTexts.clear();
 
   setWelcome('en', welcome({ caption: 'Lonely', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
   out = sent(await start(enUser));
-  check('media-only welcome rejected: built-in welcome instead, /start is never silent', out.at(-1)?.payload.text === en.help.private &&
-    hasReplyKeyboard(out.at(-1)) && noFollowUp(out), out.map((c) => c.method));
+  check('media-only welcome whose media fails: greeting, then the built-in welcome; /start is never silent',
+    isGreeting(out[0]) && out.at(-1)?.payload.text === en.help.private && hasReplyKeyboard(out.at(-1)) && noFollowUp(out),
+    out.map((c) => c.method));
 
   failingMethods.clear();
+  warnings.length = 0;
   failingTexts.add('Text fails');
   setWelcome('en', welcome({ text: 'Text fails', caption: 'Media works', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
-  at = await start(enUser);
-  out = sent(at);
-  check('text fails but media works: greeting, then the photo with its caption and the buttons as the last message',
-    isGreeting(out[0]) && out.at(-1)?.method === 'sendPhoto' && out.at(-1)?.payload.caption === 'Media works' &&
-    inline(out.at(-1))?.length === 1 && noFollowUp(out), out.map((c) => c.method));
+  out = sent(await start(enUser));
+  check('first message (the text) fails: warning logged, the photo still goes out with its caption and buttons, nothing after',
+    out.length === 2 && out[0].payload.text === 'Text fails' && out[1].method === 'sendPhoto' && out[1].payload.caption === 'Media works' &&
+    inline(out[1])?.length === 1 && noGreeting(out) && noFollowUp(out) && warnings.length === 1 && warnings[0].includes('text'),
+    out.map((c) => c.method));
+  setWelcome('en', welcome({ text: 'Text fails', buttons: [button(1)] }));
+  out = sent(await start(enUser));
+  check('text fails, no media: the links message still goes out, nothing after', out.length === 2 && isLinks(out[1], 1) &&
+    noFollowUp(out), out.map((c) => c.payload.text));
   failingTexts.clear();
 
-  console.log('\n== Greeting ==');
+  console.log('\n== Greeting (only when there is no welcome text) ==');
   warnings.length = 0;
   failingTexts.add(GREET);
-  setWelcome('en', welcome({ text: 'Still delivered', buttons: [button(1)] }));
+  setWelcome('en', welcome({ caption: 'Still delivered', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
   out = sent(await start(enUser));
-  check('greeting fails: the welcome is still sent with its buttons, nothing after it',
-    out.length === 2 && out[0].payload.text === GREET && out[1].payload.text === 'Still delivered' && inline(out[1])?.length === 1 &&
-    noFollowUp(out), out.map((c) => c.payload.text));
+  check('greeting fails: the media is still sent with its caption and buttons, nothing after it',
+    out.length === 2 && out[0].payload.text === GREET && out[1].method === 'sendPhoto' && out[1].payload.caption === 'Still delivered' &&
+    inline(out[1])?.length === 1 && noFollowUp(out), out.map((c) => c.method));
   check('...and a short warning was logged', warnings.length === 1 && warnings[0].includes('greeting') && warnings[0].length < 300, warnings);
   failingTexts.clear();
   console.warn = realWarn;
@@ -197,25 +212,40 @@ import {
     ['*Ana* <b>x</b>', 'Welcome *Ana* <b>x</b>', 'formatting characters kept as plain text'],
   ] as const) {
     out = sent(await start({ id: 2001, language_code: 'en', first_name: firstName }));
-    check(`${label} → ${JSON.stringify(expected.slice(0, 24))}`, isGreeting(out[0], expected) && out[1]?.payload.text === 'Still delivered',
+    check(`${label} → ${JSON.stringify(expected.slice(0, 24))}`, isGreeting(out[0], expected) && out[1]?.payload.caption === 'Still delivered',
       out[0]?.payload.text);
   }
 
-  setWelcome('zh', welcome({ text: '中文欢迎', buttons: [button(1)] }));
-  setWelcome('th', welcome({ text: 'ข้อความต้อนรับ', buttons: [button(1)] }));
-  for (const [user, greeting, noName, text] of [
+  setWelcome('zh', welcome({ caption: '中文欢迎', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
+  setWelcome('th', welcome({ caption: 'ข้อความต้อนรับ', mediaUrl: PHOTO, mediaType: 'photo', buttons: [button(1)] }));
+  for (const [user, greeting, noName, caption] of [
     [enUser, 'Welcome Tester', 'Welcome', 'Still delivered'],
     [zhUser, '欢迎 Tester', '欢迎', '中文欢迎'],
     [thUser, 'ยินดีต้อนรับ Tester', 'ยินดีต้อนรับ', 'ข้อความต้อนรับ'],
   ] as const) {
     out = sent(await start(user));
-    check(`${user.id}: greeting ${JSON.stringify(greeting)} with the keyboard in the user's language, then the welcome`,
-      out.length === 2 && isGreeting(out[0], greeting) && out[1].payload.text === text, out.map((c) => c.payload.text));
+    check(`${user.id}: greeting ${JSON.stringify(greeting)} with the keyboard in the user's language, then the media`,
+      out.length === 2 && isGreeting(out[0], greeting) && out[1].payload.caption === caption, out.map((c) => c.payload.text ?? c.method));
     out = sent(await start({ ...user, first_name: '' }));
     check(`${user.id}: no first name → ${JSON.stringify(noName)}`, isGreeting(out[0], noName), out[0]?.payload.text);
   }
   check('greeting keyboard uses the user\'s language labels',
     JSON.stringify(sent(await start(thUser))[0]?.payload.reply_markup?.keyboard).includes(th.keyboard.search));
+
+  setWelcome('en', welcome({ text: 'EN text', buttons: [button(1)] }));
+  setWelcome('zh', welcome({ text: '中文文本', buttons: [button(1)] }));
+  setWelcome('th', welcome({ text: 'ข้อความไทย', buttons: [button(1)] }));
+  for (const [user, text, links, keyLabel] of [
+    [enUser, 'EN text', en.app.welcomeButtons, en.keyboard.search],
+    [zhUser, '中文文本', zh.app.welcomeButtons, zh.keyboard.search],
+    [thUser, 'ข้อความไทย', th.app.welcomeButtons, th.keyboard.search],
+  ] as const) {
+    out = sent(await start(user));
+    check(`${user.id}: welcome text first with the keyboard in its language, then the localized links message ${JSON.stringify(links)}`,
+      out.length === 2 && isKeyboardText(out[0], text) && JSON.stringify(out[0].payload.reply_markup?.keyboard).includes(keyLabel) &&
+      isLinks(out[1], 1, links) && noGreeting(out), out.map((c) => c.payload.text));
+  }
+  setWelcome('en', undefined);
   setWelcome('zh', undefined);
   setWelcome('th', undefined);
 
@@ -364,9 +394,9 @@ import {
   check('new user /start: language selector, no welcome yet', sent(at).length === 1 && !sent(at).some((c) => c.payload.text === '欢迎！'));
   at = await send(tapUpdate(newUser, 'lang:zh:start'));
   out = sent(at);
-  check('after picking Chinese: confirmation edit, then the Chinese greeting with the keyboard, then the welcome, nothing after',
-    texts(at)[0] === zh.language.saved && isGreeting(out[0], '欢迎 Tester') && out[1]?.payload.text === '欢迎！' &&
-    inline(out[1])?.length === 1 && out.length === 2 && noFollowUp(out), texts(at));
+  check('after picking Chinese: confirmation edit, then the Chinese welcome text with the keyboard, then the links message, nothing after',
+    texts(at)[0] === zh.language.saved && isKeyboardText(out[0], '欢迎！') && isLinks(out[1], 1, zh.app.welcomeButtons) &&
+    out.length === 2 && noGreeting(out) && noFollowUp(out), texts(at));
   check('chat command menu still synced once', calls.slice(at).filter((c) => c.method === 'setMyCommands').length === 1);
 
   const otherNew: User = { id: 2101, language_code: 'en' };
