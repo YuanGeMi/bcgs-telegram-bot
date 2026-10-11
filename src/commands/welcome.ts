@@ -3,8 +3,10 @@ import type { BotContext } from '../context';
 import { t, type Locale } from '../i18n';
 import { mainKeyboard, replyWithMainMenu } from '../keyboard';
 import { getWelcome, WELCOME_CAPTION_MAX, WELCOME_TEXT_MAX, type Welcome } from '../services/welcome';
-import { renderWelcomeTemplate } from '../services/welcome-placeholders';
+import { cleanName, renderWelcomeTemplate } from '../services/welcome-placeholders';
 import { buildHelpReply } from './help';
+
+const GREETING_NAME_MAX = 64;
 
 /** Short reason for logs. Telegram errors don't carry the media URL, but strip any URL just in case. */
 function describeError(error: unknown): string {
@@ -26,12 +28,24 @@ function sendMedia(
   return ctx.replyWithVideo(media.url, other);
 }
 
-type CustomWelcomeResult = { sent: false } | { sent: true; keyboardShown: boolean };
+/** "Welcome Ana" with the bottom keyboard, as plain text. A failure is logged and never blocks the welcome. */
+async function sendGreeting(ctx: BotContext, locale: Locale): Promise<void> {
+  const name = Array.from(cleanName(ctx.from?.first_name)).slice(0, GREETING_NAME_MAX).join('').trimEnd();
+  const text = name ? t('app.greeting', { name }, locale) : t('app.greetingNoName', {}, locale);
+  try {
+    await ctx.reply(text, { reply_markup: mainKeyboard(locale) });
+  } catch (error) {
+    console.warn(`Welcome greeting (${locale}) could not be sent: ${describeError(error)}`);
+  }
+}
+
+type CustomWelcomeResult = { sent: false } | { sent: true; keyboardMissing: boolean };
 
 /**
  * Sends the admin-edited welcome as plain text (no parse mode), in up to two messages:
  * the welcome text, then the media with its own caption. The inline buttons, or the bottom
- * keyboard when there are none, go on the last message actually sent.
+ * keyboard when there are none, go on the last message actually sent. With inline buttons,
+ * the bottom keyboard goes on a short greeting sent before the welcome instead.
  */
 async function sendCustomWelcome(ctx: BotContext, welcome: Welcome, locale: Locale): Promise<CustomWelcomeResult> {
   const user = { firstName: ctx.from?.first_name, lastName: ctx.from?.last_name, username: ctx.from?.username };
@@ -44,6 +58,7 @@ async function sendCustomWelcome(ctx: BotContext, welcome: Welcome, locale: Loca
     : null;
   // One keyboard per message: without inline buttons the bottom keyboard rides on the last welcome message.
   const markup = inline ?? mainKeyboard(locale);
+  if (inline) await sendGreeting(ctx, locale);
 
   let textMessageId: number | null = null;
   if (text) {
@@ -56,27 +71,26 @@ async function sendCustomWelcome(ctx: BotContext, welcome: Welcome, locale: Loca
   }
 
   if (!welcome.media) {
-    return textMessageId === null ? { sent: false } : { sent: true, keyboardShown: !inline };
+    return textMessageId === null ? { sent: false } : { sent: true, keyboardMissing: false };
   }
 
   try {
     await sendMedia(ctx, welcome.media, caption, markup);
-    return { sent: true, keyboardShown: !inline };
+    return { sent: true, keyboardMissing: false };
   } catch (error) {
     console.warn(`Welcome ${welcome.media.type} (${locale}) could not be sent: ${describeError(error)}`);
   }
 
   if (textMessageId === null || !ctx.chat) return { sent: false };
   // The media failed after the text went out: the text is now the last message, so the buttons move onto it.
-  // Only inline keyboards can be added by editing; the bottom keyboard needs the follow-up message.
-  if (inline) {
-    try {
-      await ctx.api.editMessageReplyMarkup(ctx.chat.id, textMessageId, { reply_markup: inline });
-    } catch (error) {
-      console.warn(`Welcome buttons (${locale}) could not be added to the text: ${describeError(error)}`);
-    }
+  // Only inline keyboards can be added by editing; without a greeting the bottom keyboard needs the follow-up message.
+  if (!inline) return { sent: true, keyboardMissing: true };
+  try {
+    await ctx.api.editMessageReplyMarkup(ctx.chat.id, textMessageId, { reply_markup: inline });
+  } catch (error) {
+    console.warn(`Welcome buttons (${locale}) could not be added to the text: ${describeError(error)}`);
   }
-  return { sent: true, keyboardShown: false };
+  return { sent: true, keyboardMissing: false };
 }
 
 /** Private-chat welcome: the admin-edited one when set, otherwise the built-in help with the bottom keyboard. */
@@ -93,5 +107,5 @@ export async function sendWelcome(ctx: BotContext, locale: Locale): Promise<void
     await replyWithMainMenu(ctx, buildHelpReply(false, locale));
     return;
   }
-  if (!result.keyboardShown) await replyWithMainMenu(ctx, t('keyboard.ready', {}, locale));
+  if (result.keyboardMissing) await replyWithMainMenu(ctx, t('keyboard.ready', {}, locale));
 }

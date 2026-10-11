@@ -3,7 +3,7 @@ export type WelcomeUser = { firstName?: string; lastName?: string; username?: st
 /** Control, zero-width and bidi-override characters: a name must not reorder or hide the surrounding text. */
 const UNSAFE_CHARS = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202E\u2060-\u2069\uFEFF]/g;
 
-function cleanName(value: string | undefined): string {
+export function cleanName(value: string | undefined): string {
   return (value ?? '').replace(UNSAFE_CHARS, '').replace(/\s+/g, ' ').trim();
 }
 
