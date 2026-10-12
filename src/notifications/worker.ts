@@ -1,6 +1,7 @@
 import { GrammyError, HttpError } from 'grammy';
+import type { MessageEntity } from 'grammy/types';
 import { DEFAULT_LOCALE, isLocale } from '../i18n';
-import { buildCaseNotificationText } from './message';
+import { buildCaseNotification } from './message';
 import type { ClaimedNotification, OutboxStore } from './outbox';
 import { realClock, SendRateLimiter, type Clock } from './rate-limiter';
 
@@ -16,7 +17,7 @@ export type SendMessageApi = {
   sendMessage(
     chatId: string,
     text: string,
-    other: { link_preview_options: { is_disabled: true } },
+    other: { entities: MessageEntity[]; link_preview_options: { is_disabled: true } },
   ): Promise<{ message_id: number }>;
 };
 
@@ -91,10 +92,10 @@ export function createCaseNotificationWorker(options: {
     if (row.attempts > MAX_ATTEMPTS) return { kind: 'permanent', code: 'max_attempts' };
     const saved = await store.readLanguage(row.telegramUserId);
     const locale = isLocale(saved) ? saved : DEFAULT_LOCALE;
-    const text = buildCaseNotificationText(row, locale);
+    const { text, entities } = buildCaseNotification(row, locale);
     await limiter.acquire(row.telegramUserId);
     try {
-      const message = await api.sendMessage(row.telegramUserId, text, { link_preview_options: { is_disabled: true } });
+      const message = await api.sendMessage(row.telegramUserId, text, { entities, link_preview_options: { is_disabled: true } });
       return { kind: 'sent', messageId: String(message.message_id) };
     } catch (error) {
       return classifySendError(error);

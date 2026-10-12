@@ -2,9 +2,9 @@ import type { Bot } from 'grammy';
 import { decodeNav, type NavAction } from '../callback-data';
 import type { BotContext } from '../context';
 import { getLocale, t, type Locale } from '../i18n';
-import { editScreen, type Screen } from '../inline-keyboards';
+import { editScreen, isMediaMessage, sendScreen, type Screen } from '../inline-keyboards';
 import { startComplaintFlow } from './complaint';
-import { buildRankingsScreen } from './rankings';
+import { buildRankingsScreen, loadRankingsBanner } from './rankings';
 import { buildReviewScreen, buildReviewScreenBySlug } from './review';
 import { buildCasinoCardScreen, buildSearchScreen } from './search';
 
@@ -16,7 +16,7 @@ function repliedQuery(ctx: BotContext): string | null {
   return query || null;
 }
 
-async function screenFor(ctx: BotContext, action: NavAction, locale: Locale): Promise<Screen | null> {
+async function screenFor(ctx: BotContext, action: NavAction, locale: Locale, onMedia: boolean): Promise<Screen | null> {
   switch (action.kind) {
     case 'card':
     case 'searchCard':
@@ -34,8 +34,10 @@ async function screenFor(ctx: BotContext, action: NavAction, locale: Locale): Pr
       const query = repliedQuery(ctx);
       return query ? buildReviewScreen(ctx, query, locale) : null;
     }
-    case 'rankingsPage':
-      return buildRankingsScreen(ctx, action.category ?? '', action.page, locale, true);
+    case 'rankingsPage': {
+      const intro = onMedia ? (await loadRankingsBanner(locale))?.introText : undefined;
+      return buildRankingsScreen(ctx, action.category ?? '', action.page, locale, true, intro);
+    }
     case 'complaint':
       return null;
   }
@@ -56,7 +58,21 @@ export function registerNavigation(bot: Bot<BotContext>) {
         return;
       }
 
-      const screen = await screenFor(ctx, action, locale);
+      // Buttons on the rankings banner edit its caption; the same buttons on an older text message edit the text.
+      const onMedia = isMediaMessage(ctx.callbackQuery.message);
+      if (action.kind === 'cardReview' && onMedia) {
+        // A review doesn't fit in a caption: it goes out as a new message below the banner, which stays as it is.
+        const review = await buildReviewScreenBySlug(ctx, action.card.slug, locale);
+        if (!review) {
+          await ctx.answerCallbackQuery({ text: t('buttons.unavailable', {}, locale) });
+          return;
+        }
+        await ctx.answerCallbackQuery();
+        await sendScreen(ctx, review);
+        return;
+      }
+
+      const screen = await screenFor(ctx, action, locale, onMedia);
       if (!screen) {
         await ctx.answerCallbackQuery({ text: t('buttons.unavailable', {}, locale) });
         return;

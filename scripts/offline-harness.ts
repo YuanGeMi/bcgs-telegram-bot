@@ -6,7 +6,8 @@ process.env.DATABASE_URL = 'postgresql://offline:offline@127.0.0.1:9/offline';
 process.env.ADMIN_CHAT_ID = '-1009999';
 
 type Row = Record<string, unknown>;
-export type Call = { method: string; payload: any };
+/** `result` is what the stub answered on success (absent when the call failed). */
+export type Call = { method: string; payload: any; result?: any };
 export type User = { id: number; language_code?: string; first_name?: string; last_name?: string; username?: string };
 
 const failures: string[] = [];
@@ -176,23 +177,44 @@ export const calls: Call[] = [];
 export const failingMethods = new Set<string>();
 /** Message texts that answer with the same 400 error, to fail one message without failing every sendMessage. */
 export const failingTexts = new Set<string>();
+/** Media (URL or file_id) that answer with the same 400 error, e.g. to simulate a refused banner. */
+export const failingMedia = new Set<string>();
+/** Telegram methods that answer "message is not modified". */
+export const notModifiedMethods = new Set<string>();
 let messageId = 5000;
+let fileIdCounter = 1;
+const MEDIA_FIELD: Record<string, 'photo' | 'animation' | 'video'> = { sendPhoto: 'photo', sendAnimation: 'animation', sendVideo: 'video' };
 const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
   const method = String(url).split('/').pop() ?? '';
   const payload = init?.body ? JSON.parse(String(init.body)) : {};
-  calls.push({ method, payload });
-  if (failingMethods.has(method) || (typeof payload.text === 'string' && failingTexts.has(payload.text))) {
+  const call: Call = { method, payload };
+  calls.push(call);
+  const field = MEDIA_FIELD[method];
+  if (failingMethods.has(method) || (typeof payload.text === 'string' && failingTexts.has(payload.text)) ||
+    (field && failingMedia.has(payload[field]))) {
     return new Response(JSON.stringify({
       ok: false, error_code: 400, description: 'Bad Request: wrong file identifier/HTTP URL specified',
     }));
   }
+  if (notModifiedMethods.has(method)) {
+    return new Response(JSON.stringify({
+      ok: false, error_code: 400,
+      description: 'Bad Request: message is not modified: specified new message content and reply markup are exactly the same',
+    }));
+  }
   const returnsTrue = ['answerCallbackQuery', 'setMyCommands', 'deleteMyCommands', 'setChatMenuButton'].includes(method);
-  return new Response(JSON.stringify({
-    ok: true,
-    result: returnsTrue
-      ? true
-      : { message_id: messageId++, date: 0, chat: { id: payload.chat_id, type: 'private' }, text: payload.text },
-  }));
+  const media = field && {
+    photo: { photo: [{ file_id: `thumb-${fileIdCounter}`, file_unique_id: 'u', width: 90, height: 90 }, { file_id: `fid-photo-${fileIdCounter++}`, file_unique_id: 'u', width: 800, height: 400 }] },
+    animation: { animation: { file_id: `fid-animation-${fileIdCounter++}`, file_unique_id: 'u', width: 1, height: 1, duration: 1 } },
+    video: { video: { file_id: `fid-video-${fileIdCounter++}`, file_unique_id: 'u', width: 1, height: 1, duration: 1 } },
+  }[field];
+  call.result = returnsTrue
+    ? true
+    : {
+      message_id: messageId++, date: 0, chat: { id: payload.chat_id, type: 'private' },
+      ...(media ? { ...media, caption: payload.caption } : { text: payload.text }),
+    };
+  return new Response(JSON.stringify({ ok: true, result: call.result }));
 }) as typeof fetch;
 
 let updateId = 1;
@@ -221,9 +243,17 @@ export function textUpdate(user: User, text: string, chatType = 'private'): Upda
     },
   } as unknown as Update;
 }
-type TapOptions = { chatType?: string; replyToText?: string; messageId?: number };
+type TapOptions = { chatType?: string; replyToText?: string; messageId?: number; media?: 'photo' | 'animation' | 'video' };
 
-/** A button tap on a bot message; `replyToText` is the user message that bot message replied to. */
+function messageBody(media: TapOptions['media']) {
+  const file = { file_id: 'fid-on-screen', file_unique_id: 'u', width: 1, height: 1, duration: 1 };
+  if (media === 'photo') return { photo: [file], caption: 'bot caption' };
+  if (media === 'animation') return { animation: file, document: file, caption: 'bot caption' };
+  if (media === 'video') return { video: file, caption: 'bot caption' };
+  return { text: 'bot message' };
+}
+
+/** A button tap on a bot message (text, or `media` with a caption); `replyToText` is the user message it replied to. */
 export function tapUpdate(user: User, data: string, options: TapOptions = {}): Update {
   const chat = chatOf(user, options.chatType ?? 'private');
   return {
@@ -231,7 +261,7 @@ export function tapUpdate(user: User, data: string, options: TapOptions = {}): U
     callback_query: {
       id: `cb${updateId}`, chat_instance: 'ci', data, from: fromOf(user),
       message: {
-        message_id: options.messageId ?? 4242, date: 0, chat, text: 'bot message',
+        message_id: options.messageId ?? 4242, date: 0, chat, ...messageBody(options.media),
         ...(options.replyToText
           ? { reply_to_message: { message_id: 4100, date: 0, chat, from: fromOf(user), text: options.replyToText } }
           : {}),

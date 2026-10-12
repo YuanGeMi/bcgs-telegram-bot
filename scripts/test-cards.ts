@@ -81,8 +81,10 @@ import {
   at = await tap(user, 'v:stake');
   check('Read Review edits the same message into the review', since(at, 'sendMessage').length === 0 &&
     edited(at)?.startsWith('Stake\nOverall rating: 4.6/5') === true, edited(at));
-  check('review view: Visit Website, Submit Complaint, Back to the card', JSON.stringify(shape(buttons(at))) ===
-    JSON.stringify([[url('stake')], ['cp:stake'], ['c:stake']]), shape(buttons(at)));
+  check('review view: Visit Website + Complaint side by side, Back to the card below', JSON.stringify(shape(buttons(at))) ===
+    JSON.stringify([[url('stake'), 'cp:stake'], ['c:stake']]), shape(buttons(at)));
+  check('review view labels: short "📝 Complaint"', JSON.stringify(buttons(at).map((r) => r.map((b) => b.text))) ===
+    JSON.stringify([['🌐 Visit Website', '📝 Complaint'], ['⬅️ Back']]));
   at = await tap(user, 'c:stake');
   check('Back shows the card again (same buttons, no Back of its own)', edited(at)?.startsWith('Stake\nRating: 4.6/5') === true &&
     JSON.stringify(shape(buttons(at))) === JSON.stringify([['v:stake', url('stake')], ['cp:stake']]), [edited(at), singleText]);
@@ -129,7 +131,8 @@ import {
   check(`review that would pass 4096 characters is cut to ${charlie.length} (<= 4096)`, charlie.length <= 4096 && charlie.length > 3000);
   check('...cleanly, ending with the full-review line', charlie.endsWith(t('review.readFull', { url: 'https://www.bc.gs/en/casinos/charlie-casino' }, 'en')) &&
     charlie.includes('…\n\nRead the full review'), charlie.slice(-200));
-  check('...buttons still there', JSON.stringify(shape(buttons(at))) === JSON.stringify([[url('charlie-casino')], ['cp:charlie-casino'], ['kr:1:charlie-casino']]));
+  check('...buttons still there (rankings review: one action row, Back to the rankings card)', JSON.stringify(shape(buttons(at))) ===
+    JSON.stringify([[url('charlie-casino'), 'cp:charlie-casino'], ['kr:1:charlie-casino']]));
   at = await send(textUpdate(user, '/review stake'));
   check('short review keeps the plain link at the end', texts(at)[0]?.endsWith('\n\nhttps://www.bc.gs/en/casinos/stake') === true);
 
@@ -152,7 +155,7 @@ import {
     JSON.stringify([t('complaint.startWithCasino', { label: 'complaint', casinoName: 'Delta Casino' }, 'en'), en.complaint.askSubject]), texts(at));
   check('saved casinoId c-delta', (await finishFlow(user))?.casinoId === 'c-delta');
   at = await tap(user, 'v:stake');
-  const reviewComplaint = buttons(at)[1][0].callback_data;
+  const reviewComplaint = buttons(at)[0][1].callback_data;
   at = await tap(user, reviewComplaint);
   check('from the review view: preselected Stake', texts(at)[0] === t('complaint.startWithCasino', { label: 'complaint', casinoName: 'Stake' }, 'en'));
   const saved = await finishFlow(user);
@@ -173,8 +176,9 @@ import {
   check('group card: Read Review works as a callback, complaint is the deep link',
     buttons(at)[0][0].callback_data === 'v:stake' && buttons(at)[1][0].url === 'https://t.me/offline_bot?start=complaint_stake');
   at = await tap(groupUser, 'v:stake', { chatType: 'supergroup' });
-  check('group review view: complaint deep link, Back to card', buttons(at)[1][0].url === 'https://t.me/offline_bot?start=complaint_stake' &&
-    buttons(at)[2][0].callback_data === 'c:stake');
+  check('group review view: complaint deep link next to Visit Website, Back to card', JSON.stringify(shape(buttons(at))) ===
+    JSON.stringify([[url('stake'), 'url:https://t.me/offline_bot?start=complaint_stake'], ['c:stake']]) &&
+    buttons(at)[0][1].text === '📝 Complaint' && !buttons(at)[0][1].callback_data, shape(buttons(at)));
   at = await tap(groupUser, `cp:${'x'.repeat(55)}`, { chatType: 'supergroup' });
   check('slug too long for the start parameter -> plain complaint link', buttons(at)[0]?.[0]?.url === 'https://t.me/offline_bot?start=complaint');
 
@@ -185,7 +189,8 @@ import {
   check('zh card', JSON.stringify(buttons(at).map((r) => r.map((b) => b.text))) === JSON.stringify([['📖 阅读评测', '🌐 访问网站'], ['📝 提交投诉']]) &&
     buttons(at)[0][1].url === 'https://www.bc.gs/zh/casinos/stake');
   at = await tap(zhUser, 'v:stake');
-  check('zh review view', JSON.stringify(buttons(at).map((r) => r.map((b) => b.text))) === JSON.stringify([['🌐 访问网站'], ['📝 提交投诉'], ['⬅️ 返回']]));
+  check('zh review view', JSON.stringify(buttons(at).map((r) => r.map((b) => b.text))) === JSON.stringify([['🌐 访问网站', '📝 投诉'], ['⬅️ 返回']]) &&
+    JSON.stringify(shape(buttons(at))) === JSON.stringify([[url('stake', 'zh'), 'cp:stake'], ['c:stake']]), shape(buttons(at)));
   const thUser: User = { id: 5041 };
   settings.set('5041', 'th');
   at = await send(textUpdate(thUser, '/search roobet'));

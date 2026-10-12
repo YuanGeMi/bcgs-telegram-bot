@@ -7,6 +7,9 @@
 //   kr:<page>:<slug>[:<category>]  card opened from a rankings page (Back = k:...)     Read Review = kv:<page>:<slug>[:<category>]
 //   v: / sv: / kv:                 the review opened from that card (Back = the card's own data)
 //
+// The same k:/kr:/kv: buttons sit on the rankings banner (a photo, GIF or video): there they edit its caption,
+// and kv: sends the review as a new message without Back. The handler tells the two apart by the tapped message.
+//
 //   sb                             back to the /search list (query is read from the message being replied to)
 //   r:<slug>                       open a casino review from a /review list (Back = rb)
 //   rb                             back to the /review list (same as sb)

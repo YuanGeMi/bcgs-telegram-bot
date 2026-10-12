@@ -69,7 +69,8 @@ import {
 
   console.log('\n== Review ==');
   at = await send(textUpdate(english, '/review stake'));
-  check('review: Visit Website, Submit Complaint on its own row, no Back', JSON.stringify(shape(buttons(at))) === JSON.stringify([[url('stake')], ['cp:stake']]), shape(buttons(at)));
+  check('review: Visit Website + Complaint in one row, no Back', JSON.stringify(shape(buttons(at))) === JSON.stringify([[url('stake'), 'cp:stake']]) &&
+    JSON.stringify(rowLabels(buttons(at))) === JSON.stringify([['🌐 Visit Website', '📝 Complaint']]), shape(buttons(at)));
   check('review text unchanged', texts(at)[0]?.startsWith('Stake\nOverall rating: 4.6/5') ?? false);
   at = await send(textUpdate(english, '/review casino'));
   const chooseText = texts(at)[0];
@@ -77,7 +78,7 @@ import {
     buttons(at).flat().map((b) => b.callback_data).join() === 'r:alpha-casino,r:bravo-casino,r:charlie-casino,r:delta-casino,r:echo-casino');
   at = await tap(english, 'r:alpha-casino', { replyToText: '/review casino' });
   check('review opened from the list, with Back last', edits(at)[0]?.payload.text.startsWith('Alpha Casino\nOverall rating: 4.1/5') &&
-    JSON.stringify(shape(buttons(at))) === JSON.stringify([[url('alpha-casino')], ['cp:alpha-casino'], ['rb']]), shape(buttons(at)));
+    JSON.stringify(shape(buttons(at))) === JSON.stringify([[url('alpha-casino'), 'cp:alpha-casino'], ['rb']]), shape(buttons(at)));
   at = await tap(english, 'rb', { replyToText: '/review@offline_bot casino' });
   check('Back to the /review list', edits(at)[0]?.payload.text === chooseText);
 
@@ -176,7 +177,8 @@ import {
   check('Submit Complaint is a URL deep link, never a callback', complaintButton?.url === 'https://t.me/offline_bot?start=complaint_stake' &&
     !complaintButton?.callback_data && complaintButton?.text === '📝 Submit Complaint', complaintButton);
   at = await send(textUpdate(groupUser, '/review stake', 'supergroup'));
-  check('review in group: complaint is the deep link too', buttons(at)[1]?.[0]?.url === 'https://t.me/offline_bot?start=complaint_stake');
+  check('review in group: complaint is the deep link too, beside Visit Website', JSON.stringify(shape(buttons(at))) ===
+    JSON.stringify([[url('stake'), 'url:https://t.me/offline_bot?start=complaint_stake']]) && !buttons(at)[0]?.[1]?.callback_data, shape(buttons(at)));
   at = await tap(groupUser, 's:stake', { chatType: 'supergroup', replyToText: '/search st' });
   check('card opened in a group: deep link button', buttons(at)[1]?.[0]?.url === 'https://t.me/offline_bot?start=complaint_stake' &&
     edits(at).length === 1);
@@ -209,8 +211,9 @@ import {
     JSON.stringify(rowLabels(buttons(at))) === JSON.stringify([['📖 อ่านรีวิว', '🌐 เยี่ยมชมเว็บไซต์'], ['📝 ส่งข้อร้องเรียน'], ['⬅️ ย้อนกลับ']]) &&
     buttons(at)[0][1].url === 'https://www.bc.gs/th/casinos/alpha-casino', rowLabels(buttons(at)));
   at = await tap(thUser, 'kv:1:alpha-casino');
-  check('th review view: Thai labels, one button per row', JSON.stringify(rowLabels(buttons(at))) ===
-    JSON.stringify([['🌐 เยี่ยมชมเว็บไซต์'], ['📝 ส่งข้อร้องเรียน'], ['⬅️ ย้อนกลับ']]), rowLabels(buttons(at)));
+  check('th review view from rankings: Thai labels, actions side by side, Back below', JSON.stringify(rowLabels(buttons(at))) ===
+    JSON.stringify([['🌐 เยี่ยมชมเว็บไซต์', '📝 ร้องเรียน'], ['⬅️ ย้อนกลับ']]) &&
+    JSON.stringify(shape(buttons(at))) === JSON.stringify([[url('alpha-casino', 'th'), 'cp:alpha-casino'], ['kr:1:alpha-casino']]), rowLabels(buttons(at)));
   at = await tap(thUser, 's:gone');
   check('th "no longer available"', unavailableOnly(at, th.buttons.unavailable));
   at = await send(textUpdate(thUser, '/links'));
@@ -251,6 +254,48 @@ import {
     const { unavailable, ...labels } = catalog.buttons;
     console.log(`  ${name}: ${Object.entries(labels).map(([key, text]) => `${key}=${text} (${width(text)})`).join(', ')}`);
   }
+  check('short complaint label is no longer than the English one in every language',
+    [zh, th].every((catalog) => width(catalog.buttons.complaintShort) <= width(en.buttons.complaintShort)),
+    [en, zh, th].map((c) => `${c.buttons.complaintShort}=${width(c.buttons.complaintShort)}`));
+
+  console.log('\n== Review keyboard built directly: every source, Back or not, missing website URL, groups ==');
+  const { reviewKeyboard } = await import('../src/inline-keyboards');
+  const ctxFor = (type: 'private' | 'supergroup') => ({ chat: { type }, me: { username: 'offline_bot' } }) as any;
+  const rows = (kb: any) => (kb?.inline_keyboard ?? []) as any[][];
+  const deepLink = 'url:https://t.me/offline_bot?start=complaint_stake';
+  const sources = [
+    ['/review (no Back)', undefined, null],
+    ['search card', { kind: 'card', slug: 'stake' }, 'c:stake'],
+    ['search list card', { kind: 'searchCard', slug: 'stake' }, 's:stake'],
+    ['/review list', { kind: 'reviewBack' }, 'rb'],
+    ['rankings card', { kind: 'rankingsCard', page: 2, slug: 'stake', category: 'crypto' }, 'kr:2:stake:crypto'],
+  ] as const;
+  const layoutProblems: string[] = [];
+  for (const locale of ['en', 'zh', 'th'] as const) {
+    const catalog = { en, zh, th }[locale];
+    for (const chat of ['private', 'supergroup'] as const) {
+      for (const [name, back, backData] of sources) {
+        const kb = rows(reviewKeyboard(ctxFor(chat), 'stake', locale, back as any));
+        const complaint = chat === 'private' ? 'cp:stake' : deepLink;
+        const expected = [[url('stake', locale), complaint], ...(backData ? [[backData]] : [])];
+        const labels = [[`🌐 ${catalog.buttons.visitWebsite}`, `📝 ${catalog.buttons.complaintShort}`], ...(backData ? [[`⬅️ ${catalog.buttons.back}`]] : [])];
+        if (JSON.stringify(shape(kb)) !== JSON.stringify(expected) || JSON.stringify(rowLabels(kb)) !== JSON.stringify(labels)) {
+          layoutProblems.push(`${locale}/${chat}/${name}: ${JSON.stringify(shape(kb))} ${JSON.stringify(rowLabels(kb))}`);
+        }
+        if (backData && encodeNav(back as any) !== backData) layoutProblems.push(`${name}: Back data ${encodeNav(back as any)}`);
+      }
+    }
+  }
+  check('30 combinations (en/zh/th × private/group × 5 sources): one action row, Back row only when opened from a card or list',
+    layoutProblems.length === 0, layoutProblems);
+  const noSite = rows(reviewKeyboard(ctxFor('private'), 'stake', 'en', { kind: 'card', slug: 'stake' }, ''));
+  check('no website URL: Complaint alone on the first row, Back below', JSON.stringify(shape(noSite)) === JSON.stringify([['cp:stake'], ['c:stake']]) &&
+    rowLabels(noSite)[0][0] === '📝 Complaint', shape(noSite));
+  const noSiteGroup = rows(reviewKeyboard(ctxFor('supergroup'), 'stake', 'th', undefined, ''));
+  check('no website URL in a group, no Back: just the deep-link Complaint', JSON.stringify(shape(noSiteGroup)) === JSON.stringify([[deepLink]]) &&
+    rowLabels(noSiteGroup)[0][0] === '📝 ร้องเรียน', shape(noSiteGroup));
+  check('cards still use the full "Submit Complaint" label', calls.some((c) =>
+    (c.payload.reply_markup?.inline_keyboard ?? []).some((row: any[]) => row.length === 1 && row[0].text === '📝 Submit Complaint')));
 
   finish();
 })().catch((error) => {

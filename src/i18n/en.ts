@@ -41,6 +41,8 @@ const en = {
     viewReview: 'Read Review',
     visitWebsite: 'Visit Website',
     submitComplaint: 'Submit Complaint',
+    /** Review view only, where it shares a row with Visit Website; keep it no longer than this. */
+    complaintShort: 'Complaint',
     back: 'Back',
     previous: 'Previous',
     next: 'Next',
@@ -90,6 +92,8 @@ const en = {
     topCategory: 'Top {count} casinos in {categoryName}:',
     rankedCasino: '{rank}. {name} ({rating})\n   {url}',
     list: '{title}\n\n{entries}',
+    /** One casino in the rankings banner's caption (no URL: the casino buttons sit below). */
+    bannerLine: '{rank}. {name} ({rating})',
   },
   links: {
     title: '🔗 BC.GS Links',
@@ -166,35 +170,37 @@ const en = {
       none: 'none',
     },
   },
-  /** Machine-written, needs native review. Case updates sent by the notification worker, as plain text. */
+  /** Machine-written, needs native review. Case updates sent by the notification worker. */
   caseNotification: {
     title: {
-      complaint: 'BC.GS complaint update',
-      scam_report: 'BC.GS report update',
+      complaint: '📋 BC.GS complaint update',
+      scam_report: '📋 BC.GS report update',
     },
+    /** The text before each placeholder is sent in bold; the value is plain. */
     caseId: 'Case ID: {caseId}',
     casino: 'Casino/platform: {casino}',
     status: 'Status: {status}',
-    message: 'Message from BC.GS: {message}',
-    lastUpdated: 'Last updated: {time} UTC',
+    /** Bold heading; the staff message follows on the next line. */
+    messageHeading: '💬 Message from BC.GS',
+    lastUpdated: '🕒 Last updated: {time} UTC',
     statusLabels: {
       complaint: {
-        submitted: 'Submitted',
-        in_review: 'Under Review',
-        waiting_for_more_information: 'Waiting for More Information',
-        resolved: 'Resolved',
-        rejected: 'Rejected',
-        closed: 'Closed',
+        submitted: '🆕 Submitted',
+        in_review: '🔎 Under Review',
+        waiting_for_more_information: '⏳ Waiting for More Information',
+        resolved: '✅ Resolved',
+        rejected: '❌ Rejected',
+        closed: '🔒 Closed',
       },
       scam_report: {
-        received: 'Received',
-        in_review: 'Under Review',
-        verified: 'Verified',
-        not_verified: 'Not Verified',
-        closed: 'Closed',
+        received: '🆕 Received',
+        in_review: '🔎 Under Review',
+        verified: '✅ Verified',
+        not_verified: '❌ Not Verified',
+        closed: '🔒 Closed',
       },
       /** Any status not listed above for the case type, e.g. legacy open. */
-      unknown: 'Updated',
+      unknown: '🔄 Updated',
     },
   },
 } as const;

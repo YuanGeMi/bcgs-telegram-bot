@@ -1,3 +1,4 @@
+import type { MessageEntity } from 'grammy/types';
 import en from '../i18n/en';
 import { t, type Locale } from '../i18n';
 
@@ -68,24 +69,70 @@ export function formatUpdatedAt(date: Date, locale: Locale): string {
   }).format(date);
 }
 
-/** Plain-text case update. The fixed lines are always kept; only the staff message is shortened to fit. */
-export function buildCaseNotificationText(row: CaseNotificationContent, locale: Locale): string {
+/** Text plus bold entities. Sent without a parse mode, so nothing in the text is ever read as markup. */
+export type CaseNotification = { text: string; entities: MessageEntity[] };
+
+class EntityWriter {
+  text = '';
+  readonly entities: MessageEntity[] = [];
+
+  bold(part: string): void {
+    const label = part.trimEnd();
+    if (label) this.entities.push({ type: 'bold', offset: this.text.length, length: label.length });
+    this.text += part;
+  }
+
+  plain(part: string): void {
+    this.text += part;
+  }
+
+  /** Catalog text before `{name}` is bold; the value and anything after it are plain. */
+  labelled(template: string, name: string, value: string): void {
+    const marker = `{${name}}`;
+    const at = template.indexOf(marker);
+    if (at < 0) return this.bold(template);
+    this.bold(template.slice(0, at));
+    this.plain(value);
+    this.plain(template.slice(at + marker.length));
+  }
+}
+
+type CatalogKey = Parameters<typeof t>[0];
+
+/**
+ * Case update with bold title and labels. Every "BC.GS" from the catalogs sits inside a bold entity,
+ * so Telegram doesn't auto-link it. The fixed lines are always kept; only the staff message is shortened to fit.
+ */
+export function buildCaseNotification(row: CaseNotificationContent, locale: Locale): CaseNotification {
+  const text = (key: CatalogKey) => t(key, {}, locale);
   const titleKey = row.type === 'scam_report' ? 'caseNotification.title.scam_report' : 'caseNotification.title.complaint';
-  const head = [
-    t(titleKey, {}, locale),
-    t('caseNotification.caseId', { caseId: cleanText(row.caseId).replace(/\s+/g, ' ') }, locale),
-    t('caseNotification.casino', { casino: cleanCasinoLabel(row.casinoLabel) }, locale),
-    t('caseNotification.status', { status: statusLabel(row.type, row.status, locale) }, locale),
-  ];
-  const tail = t('caseNotification.lastUpdated', { time: formatUpdatedAt(row.caseUpdatedAt, locale) }, locale);
+  const caseId = cleanText(row.caseId).replace(/\s+/g, ' ');
+  const casino = cleanCasinoLabel(row.casinoLabel);
+  const status = statusLabel(row.type, row.status, locale);
+  const time = formatUpdatedAt(row.caseUpdatedAt, locale);
+
+  const write = (message: string): CaseNotification => {
+    const w = new EntityWriter();
+    w.bold(text(titleKey));
+    w.plain('\n\n');
+    w.labelled(text('caseNotification.caseId'), 'caseId', caseId);
+    w.plain('\n');
+    w.labelled(text('caseNotification.casino'), 'casino', casino);
+    w.plain('\n');
+    w.labelled(text('caseNotification.status'), 'status', status);
+    w.plain('\n\n');
+    if (message) {
+      w.bold(text('caseNotification.messageHeading'));
+      w.plain('\n');
+      w.plain(message);
+      w.plain('\n\n');
+    }
+    w.labelled(text('caseNotification.lastUpdated'), 'time', time);
+    return { text: w.text, entities: w.entities };
+  };
 
   const message = row.userMessage === null ? '' : cleanText(row.userMessage);
-  if (!message) return [...head, tail].join('\n');
-
-  const withMessage = (text: string) => [...head, t('caseNotification.message', { message: text }, locale), tail].join('\n');
-  const full = withMessage(message);
-  if (full.length <= TELEGRAM_TEXT_MAX) return full;
-
-  const room = message.length - (full.length - TELEGRAM_TEXT_MAX);
-  return withMessage(truncate(message, room));
+  const full = write(message);
+  if (!message || full.text.length <= TELEGRAM_TEXT_MAX) return full;
+  return write(truncate(message, message.length - (full.text.length - TELEGRAM_TEXT_MAX)));
 }

@@ -12,7 +12,26 @@ export type Screen = {
   keyboard?: InlineKeyboard;
   /** Send as a reply to the user's message: Back on a list re-reads the query from it. */
   replyToQuery?: boolean;
+  /** Used instead of `text` when the screen goes on a media message; defaults to `text` cut to fit a caption. */
+  caption?: string;
 };
+
+/** Telegram's media caption limit. */
+export const CAPTION_MAX = 1024;
+
+/** Cuts to `max` with an ellipsis, never splitting a surrogate pair. */
+export function clipText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let cut = text.slice(0, Math.max(0, max - 1));
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+  return `${cut.trimEnd()}…`;
+}
+
+/** True for a photo, GIF or video message, whose text is a caption (edited with editMessageCaption). */
+export function isMediaMessage(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  return 'photo' in message || 'animation' in message || 'video' in message;
+}
 
 type ButtonKey = Exclude<keyof Messages['buttons'], 'unavailable'>;
 
@@ -20,6 +39,7 @@ const EMOJI: Record<ButtonKey, string> = {
   viewReview: '📖',
   visitWebsite: '🌐',
   submitComplaint: '📝',
+  complaintShort: '📝',
   back: '⬅️',
   previous: '◀️',
   next: '▶️',
@@ -53,8 +73,13 @@ function keyboard(rows: (InlineKeyboardButton | null)[][]): InlineKeyboard | und
  * Starts the flow with this casino preselected. In private chats it starts it directly; in groups it
  * deep-links to the private chat, never starting the flow there.
  */
-function complaintButton(ctx: BotContext, slug: string, locale: Locale): InlineKeyboardButton | null {
-  const text = label('submitComplaint', locale);
+function complaintButton(
+  ctx: BotContext,
+  slug: string,
+  locale: Locale,
+  key: 'submitComplaint' | 'complaintShort' = 'submitComplaint',
+): InlineKeyboardButton | null {
+  const text = label(key, locale);
   if (ctx.chat?.type === 'private') return navButton(text, { kind: 'complaint', slug });
   return urlButton(text, ctx.me.username ? `https://t.me/${ctx.me.username}?start=${complaintStartParameter(slug)}` : undefined);
 }
@@ -75,10 +100,16 @@ export function casinoCardKeyboard(ctx: BotContext, card: CardAction, locale: Lo
   ]);
 }
 
-export function reviewKeyboard(ctx: BotContext, slug: string, locale: Locale, back?: NavAction) {
+/** Visit Website and Complaint share a row (short complaint label); without a website URL, Complaint is alone. */
+export function reviewKeyboard(
+  ctx: BotContext,
+  slug: string,
+  locale: Locale,
+  back?: NavAction,
+  websiteUrl: string | undefined = casinoUrl(slug, locale),
+) {
   return keyboard([
-    [urlButton(label('visitWebsite', locale), casinoUrl(slug, locale))],
-    [complaintButton(ctx, slug, locale)],
+    [urlButton(label('visitWebsite', locale), websiteUrl), complaintButton(ctx, slug, locale, 'complaintShort')],
     backRow(back, locale),
   ]);
 }
@@ -121,13 +152,23 @@ export async function sendScreen(ctx: BotContext, screen: Screen): Promise<void>
   });
 }
 
-/** Replaces the tapped message with `screen`; sends it as a new message if the old one can't be edited. */
+/**
+ * Replaces the tapped message with `screen`: the caption of a media message (the media stays), else the text.
+ * Sends it as a new text message if the old one can't be edited.
+ */
 export async function editScreen(ctx: BotContext, screen: Screen): Promise<void> {
   try {
-    await ctx.editMessageText(screen.text, {
-      reply_markup: screen.keyboard,
-      link_preview_options: { is_disabled: true },
-    });
+    if (isMediaMessage(ctx.callbackQuery?.message)) {
+      await ctx.editMessageCaption({
+        caption: screen.caption ?? clipText(screen.text, CAPTION_MAX),
+        reply_markup: screen.keyboard,
+      });
+    } else {
+      await ctx.editMessageText(screen.text, {
+        reply_markup: screen.keyboard,
+        link_preview_options: { is_disabled: true },
+      });
+    }
   } catch (error) {
     if (error instanceof GrammyError && /message is not modified/i.test(error.description)) return;
     await ctx.reply(screen.text, { reply_markup: screen.keyboard, link_preview_options: { is_disabled: true } });

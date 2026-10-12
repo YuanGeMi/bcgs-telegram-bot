@@ -114,12 +114,12 @@ export async function buildReviewScreen(ctx: BotContext, query: string, locale: 
   return casinoReviewScreen(ctx, exactMatch ?? casinos[0], locale);
 }
 
-/** A casino review opened from a button, with Back to where it came from; null if the casino is gone. */
+/** A casino review opened from a button, with Back to where it came from (if given); null if the casino is gone. */
 export async function buildReviewScreenBySlug(
   ctx: BotContext,
   slug: string,
   locale: Locale,
-  back: NavAction,
+  back?: NavAction,
 ): Promise<Screen | null> {
   const casino = await getCasinoBySlug(slug, locale);
   return casino ? casinoReviewScreen(ctx, casino, locale, back) : null;
