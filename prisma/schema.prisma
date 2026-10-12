@@ -35,6 +35,12 @@ enum ComplaintStatus {
   in_review
   resolved
   rejected
+  submitted
+  received
+  waiting_for_more_information
+  verified
+  not_verified
+  closed
 }
 
 enum ComplaintSource {
@@ -45,6 +51,13 @@ enum ComplaintSource {
 enum ReportType {
   complaint
   scam_report
+}
+
+enum NotificationState {
+  pending
+  processing
+  sent
+  permanent_failure
 }
 
 model Casino {
@@ -347,33 +360,72 @@ model UserReview {
 }
 
 model Complaint {
-  id            String          @id @default(cuid())
-  caseId        String          @unique
-  type          ReportType
-  casinoId      String?
-  casino        Casino?         @relation(fields: [casinoId], references: [id], onDelete: SetNull)
+  id                String                   @id @default(cuid())
+  caseId            String                   @unique
+  type              ReportType
+  casinoId          String?
+  casino            Casino?                  @relation(fields: [casinoId], references: [id], onDelete: SetNull)
   /// Free-text casino name when the casino isn't in the database yet (casinoId is null).
-  casinoName    String?
-  source        ComplaintSource @default(web)
-  userId        String?
-  user          User?           @relation("ComplaintUser", fields: [userId], references: [id], onDelete: SetNull)
-  telegramUserId String?
-  contactEmail   String?
-  contactName    String?
-  subject        String
-  description    String          @db.Text
-  evidenceUrls   String[]        @default([])
-  status         ComplaintStatus @default(open)
-  moderatedById  String?
-  moderatedBy    User?           @relation("ComplaintModeratedBy", fields: [moderatedById], references: [id], onDelete: SetNull)
-  moderatedAt    DateTime?
-  adminNotes     String?         @db.Text
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  casinoName        String?
+  source            ComplaintSource          @default(web)
+  userId            String?
+  user              User?                    @relation("ComplaintUser", fields: [userId], references: [id], onDelete: SetNull)
+  telegramUserId    String?
+  contactEmail      String?
+  contactName       String?
+  subject           String
+  description       String                   @db.Text
+  evidenceUrls      String[]                 @default([])
+  /// Allowed statuses per type are enforced by the database check constraint complaint_status_by_type
+  /// (migration 20261012140000_complaint_status_rules). A scam_report must set status: received explicitly.
+  status            ComplaintStatus          @default(submitted)
+  moderatedById     String?
+  moderatedBy       User?                    @relation("ComplaintModeratedBy", fields: [moderatedById], references: [id], onDelete: SetNull)
+  moderatedAt       DateTime?
+  adminNotes        String?                  @db.Text
+  /// Last message staff sent to the user through a notification. Never internal notes.
+  lastUserMessage   String?                  @db.Text
+  lastUserMessageAt DateTime?
+  /// Bumped on every staff status/message save; the admin form sends the revision it loaded to detect conflicts.
+  revision          Int                      @default(0)
+  notifications     CaseNotificationOutbox[]
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
 
   @@index([status, createdAt])
   @@index([casinoId, createdAt])
   @@index([telegramUserId])
+}
+
+/// Notifications to the person who filed a case, written in the same transaction as the staff change and sent later by
+/// the Telegram bot. Snapshot fields hold what the user may see; never store internal notes, evidence, admin names or
+/// contact details here.
+model CaseNotificationOutbox {
+  id                String            @id @default(cuid())
+  complaintId       String
+  complaint         Complaint         @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  revision          Int
+  telegramUserId    String
+  caseId            String
+  type              ReportType
+  status            ComplaintStatus
+  casinoLabel       String
+  userMessage       String?           @db.Text
+  caseUpdatedAt     DateTime
+  state             NotificationState @default(pending)
+  attempts          Int               @default(0)
+  nextAttemptAt     DateTime          @default(now())
+  leaseExpiresAt    DateTime?
+  sentAt            DateTime?
+  telegramMessageId String?
+  /// Short machine code only (e.g. "blocked_by_user"), never a raw error body.
+  errorCode         String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@unique([complaintId, revision])
+  @@index([state, nextAttemptAt])
+  @@index([complaintId, revision])
 }
 
 model TelegramUserSetting {

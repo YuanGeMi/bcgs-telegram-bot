@@ -50,7 +50,7 @@ import {
   check('summary still shows the casino', result.summary.includes(t('complaint.summaryCasino', { casinoLine: 'Stake' }, 'en')), result.summary);
   check('saved with casinoId, no free-text name (same as a confirmed match)',
     result.saved?.casinoId === 'c-stake' && result.saved?.casinoName === null && result.saved?.type === 'complaint' &&
-    result.saved?.source === 'telegram' && result.saved?.status === 'open', result.saved);
+    result.saved?.source === 'telegram' && result.saved?.status === 'submitted', result.saved);
 
   console.log('\n== Review (from a /review list) ==');
   await send(textUpdate(user, '/review casino'));

@@ -164,6 +164,36 @@ const th: Messages = {
       none: 'ไม่มี',
     },
   },
+  // Machine-written, needs native review.
+  caseNotification: {
+    title: {
+      complaint: 'อัปเดตข้อร้องเรียน BC.GS',
+      scam_report: 'อัปเดตรายงาน BC.GS',
+    },
+    caseId: 'Case ID: {caseId}',
+    casino: 'คาสิโน/แพลตฟอร์ม: {casino}',
+    status: 'สถานะ: {status}',
+    message: 'ข้อความจาก BC.GS: {message}',
+    lastUpdated: 'อัปเดตล่าสุด: {time} UTC',
+    statusLabels: {
+      complaint: {
+        submitted: 'ส่งแล้ว',
+        in_review: 'กำลังตรวจสอบ',
+        waiting_for_more_information: 'รอข้อมูลเพิ่มเติม',
+        resolved: 'แก้ไขแล้ว',
+        rejected: 'ปฏิเสธ',
+        closed: 'ปิดแล้ว',
+      },
+      scam_report: {
+        received: 'ได้รับแล้ว',
+        in_review: 'กำลังตรวจสอบ',
+        verified: 'ยืนยันแล้ว',
+        not_verified: 'ไม่ได้รับการยืนยัน',
+        closed: 'ปิดแล้ว',
+      },
+      unknown: 'อัปเดตแล้ว',
+    },
+  },
 };
 
 export default th;

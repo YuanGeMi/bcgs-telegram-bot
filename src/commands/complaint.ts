@@ -516,7 +516,7 @@ export async function saveSubmission(data: SubmissionData): Promise<SaveSubmissi
 
     try {
       await prisma.complaint.create({
-        data: { ...data, caseId, source: 'telegram', status: 'open' },
+        data: { ...data, caseId, source: 'telegram', status: data.type === 'complaint' ? 'submitted' : 'received' },
         select: { caseId: true },
       });
       return { caseId };

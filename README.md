@@ -11,6 +11,7 @@ Optional environment variables:
 
 - `ADMIN_CHAT_ID=<telegram-chat-id>`
 - `DIRECT_URL=<direct-postgresql-connection-url>` (migrations only)
+- `NOTIFICATIONS_ENABLED=true|false` (default `true`). When on, the bot checks `CaseNotificationOutbox` every 5 seconds and sends the case updates written by the BC.GS admin to users, in their saved language. `false`, `0`, `no` or `off` turns it off. Needs the `case_notification_outbox` migration from bc-gs; until it is applied, the bot logs a short database error about once a minute and keeps running.
 
 Run locally with `npm run dev`. Build with `npm run build`, then start with `npm start`.
 

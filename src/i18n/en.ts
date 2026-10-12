@@ -166,6 +166,37 @@ const en = {
       none: 'none',
     },
   },
+  /** Machine-written, needs native review. Case updates sent by the notification worker, as plain text. */
+  caseNotification: {
+    title: {
+      complaint: 'BC.GS complaint update',
+      scam_report: 'BC.GS report update',
+    },
+    caseId: 'Case ID: {caseId}',
+    casino: 'Casino/platform: {casino}',
+    status: 'Status: {status}',
+    message: 'Message from BC.GS: {message}',
+    lastUpdated: 'Last updated: {time} UTC',
+    statusLabels: {
+      complaint: {
+        submitted: 'Submitted',
+        in_review: 'Under Review',
+        waiting_for_more_information: 'Waiting for More Information',
+        resolved: 'Resolved',
+        rejected: 'Rejected',
+        closed: 'Closed',
+      },
+      scam_report: {
+        received: 'Received',
+        in_review: 'Under Review',
+        verified: 'Verified',
+        not_verified: 'Not Verified',
+        closed: 'Closed',
+      },
+      /** Any status not listed above for the case type, e.g. legacy open. */
+      unknown: 'Updated',
+    },
+  },
 } as const;
 
 type Shape<T> = { readonly [K in keyof T]: T[K] extends string ? string : Shape<T[K]> };

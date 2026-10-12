@@ -165,6 +165,36 @@ const zh: Messages = {
       none: '没有,都不是',
     },
   },
+  // Machine-written, needs native review.
+  caseNotification: {
+    title: {
+      complaint: 'BC.GS 投诉进度更新',
+      scam_report: 'BC.GS 举报进度更新',
+    },
+    caseId: 'Case ID：{caseId}',
+    casino: '娱乐场/平台：{casino}',
+    status: '状态：{status}',
+    message: 'BC.GS 留言：{message}',
+    lastUpdated: '最后更新：{time} UTC',
+    statusLabels: {
+      complaint: {
+        submitted: '已提交',
+        in_review: '审核中',
+        waiting_for_more_information: '等待补充信息',
+        resolved: '已解决',
+        rejected: '已驳回',
+        closed: '已关闭',
+      },
+      scam_report: {
+        received: '已收到',
+        in_review: '审核中',
+        verified: '已核实',
+        not_verified: '未核实',
+        closed: '已关闭',
+      },
+      unknown: '已更新',
+    },
+  },
 };
 
 export default zh;

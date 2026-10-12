@@ -5,6 +5,8 @@ import { refreshSavedChatCommands, setBotCommands } from './command-menu';
 import type { BotContext } from './context';
 import { resolveLocale } from './middleware/locale';
 import { rateLimit, stopRateLimitCleanup } from './middleware/ratelimit';
+import { prismaOutboxStore } from './notifications/outbox';
+import { createCaseNotificationWorker, notificationsEnabled } from './notifications/worker';
 import { prisma } from './prisma';
 
 const token = process.env.BOT_TOKEN?.trim();
@@ -35,6 +37,11 @@ bot.use(resolveLocale);
 bot.use(rateLimit);
 registerHandlers(bot);
 
+const caseNotifications = notificationsEnabled()
+  ? createCaseNotificationWorker({ store: prismaOutboxStore(prisma), api: bot.api })
+  : null;
+if (!caseNotifications) console.warn('NOTIFICATIONS_ENABLED is off; case notifications are not sent.');
+
 function isTelegramConflict(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const candidate = error as { error_code?: unknown; message?: unknown; description?: unknown };
@@ -54,6 +61,9 @@ async function shutdown(exitCode = 0): Promise<void> {
 
   try {
     await bot.stop();
+  } catch {}
+  try {
+    await caseNotifications?.stop();
   } catch {}
   try {
     await prisma.$disconnect();
@@ -78,6 +88,7 @@ void bot.start({
     void refreshSavedChatCommands(bot.api)
       .then((count) => console.log(`Refreshed ${count} chat command menus.`))
       .catch(() => console.warn('Failed to refresh chat command menus.'));
+    caseNotifications?.start();
   },
 }).catch((error: unknown) => {
   if (isTelegramConflict(error)) {
