@@ -14,8 +14,6 @@ import { casinoUrl, formatRating } from '../site';
 import { getLocale, t, type Locale } from '../i18n';
 
 const PAGE_SIZE = 5;
-/** Shortest a casino name is cut to in a caption before whole lines are dropped instead. */
-const MIN_CAPTION_NAME = 8;
 const FAILED_MEDIA_RETRY_MS = 10 * 60 * 1000;
 
 function formatList(title: string, casinos: RankedCasino[], firstRank: number, locale: Locale): string {
@@ -31,38 +29,18 @@ function formatList(title: string, casinos: RankedCasino[], firstRank: number, l
 }
 
 /**
- * The banner caption: the admin intro (if any), the page title, then one line per casino. Never over 1024:
- * long names are cut first, then lines are dropped from the bottom; the intro and title are always kept.
+ * Banner caption, with no casino lines (those are the buttons). Overall: the admin intro, or the built-in
+ * title when the intro is empty. Category: the intro (if any) and the category title. Never over 1024.
  */
-export function formatCaption(intro: string, title: string, casinos: RankedCasino[], firstRank: number, locale: Locale): string {
-  const header = clipText(intro ? `${intro}\n\n${title}` : title, CAPTION_MAX);
-  const line = (index: number, name: string) => t('rankings.bannerLine', {
-    rank: firstRank + index,
-    name,
-    rating: formatRating(casinos[index].overallRating, locale),
-  }, locale);
-  const join = (lines: string[]) => [header, ...lines].join('\n');
-
-  const full = join(casinos.map((casino, index) => line(index, casino.name)));
-  if (full.length <= CAPTION_MAX) return full;
-
-  for (let count = casinos.length; count > 0; count -= 1) {
-    const perLine = Math.floor((CAPTION_MAX - header.length - count) / count);
-    const lines: string[] = [];
-    for (let index = 0; index < count; index += 1) {
-      const nameRoom = perLine - line(index, '').length;
-      if (nameRoom < MIN_CAPTION_NAME) break;
-      lines.push(line(index, clipText(casinos[index].name, nameRoom)));
-    }
-    if (lines.length === count && join(lines).length <= CAPTION_MAX) return join(lines);
-  }
-  return header;
+function formatCaption(intro: string, title: string, category: boolean): string {
+  const text = category ? (intro ? `${intro}\n\n${title}` : title) : (intro || title);
+  return clipText(text, CAPTION_MAX);
 }
 
 /**
  * One page of the overall rankings (empty `input`) or a category's (name or slug).
  * From a button (`fromButton`), a category or page that no longer exists returns null instead of an error text.
- * A page of casinos also gets a `caption` (with `intro` on top) for the banner message.
+ * A page of casinos also gets a `caption` for the banner message: the intro, plus the category title when there is one.
  */
 export async function buildRankingsScreen(
   ctx: BotContext,
@@ -100,7 +78,7 @@ export async function buildRankingsScreen(
 
   return {
     text: formatList(title, pageCasinos, firstIndex + 1, locale),
-    caption: formatCaption(intro, title, pageCasinos, firstIndex + 1, locale),
+    caption: formatCaption(intro, title, category !== null),
     keyboard: rankingsKeyboard(
       pageCasinos.map((casino, index) => ({ slug: casino.slug, label: `${firstIndex + index + 1}. ${casino.name}` })),
       (slug) => ({ kind: 'rankingsCard', page, slug, category: categorySlug }),
@@ -189,7 +167,7 @@ async function sendBanner(
   }
 }
 
-/** /rankings: the banner with the page in its caption when one is set, otherwise (or if it fails) the text rankings. */
+/** /rankings: the banner and its caption when one is set, otherwise (or if it fails) the text rankings. */
 export async function replyRankings(ctx: BotContext, input: string): Promise<void> {
   const locale = getLocale(ctx);
   try {

@@ -91,7 +91,6 @@ const zh: Messages = {
     topCategory: '{categoryName}排名前 {count} 的娱乐场：',
     rankedCasino: '{rank}. {name} ({rating})\n   {url}',
     list: '{title}\n\n{entries}',
-    bannerLine: '{rank}. {name} ({rating})',
   },
   links: {
     title: '🔗 BC.GS 链接',

@@ -92,8 +92,6 @@ const en = {
     topCategory: 'Top {count} casinos in {categoryName}:',
     rankedCasino: '{rank}. {name} ({rating})\n   {url}',
     list: '{title}\n\n{entries}',
-    /** One casino in the rankings banner's caption (no URL: the casino buttons sit below). */
-    bannerLine: '{rank}. {name} ({rating})',
   },
   links: {
     title: '🔗 BC.GS Links',

@@ -12,15 +12,14 @@ import {
   const zh = (await import('../src/i18n/zh')).default;
   const th = (await import('../src/i18n/th')).default;
   const { t } = await import('../src/i18n');
-  const { formatRating, casinoUrl } = await import('../src/site');
+  const { casinoUrl } = await import('../src/site');
   const { parseRankingsBanner } = await import('../src/services/rankings-banner');
-  const { formatCaption } = await import('../src/commands/rankings');
   const { prisma } = await import('../src/prisma');
 
   type Locale = 'en' | 'zh' | 'th';
   const SENDS = ['sendMessage', 'sendPhoto', 'sendAnimation', 'sendVideo'];
   const MEDIA_SENDS = ['sendPhoto', 'sendAnimation', 'sendVideo'];
-  const EDITS = ['editMessageText', 'editMessageCaption'];
+  const EDITS = ['editMessageText', 'editMessageCaption', 'editMessageReplyMarkup'];
   const sent = (from: number): Call[] => calls.slice(from).filter((c) => SENDS.includes(c.method));
   const edits = (from: number): Call[] => calls.slice(from).filter((c) => EDITS.includes(c.method));
   const answers = (from: number): Call[] => calls.slice(from).filter((c) => c.method === 'answerCallbackQuery');
@@ -68,12 +67,10 @@ import {
     zh: ['Stake 娱乐场', 'Roobet', '阿尔法娱乐场', 'Bravo Casino', 'Charlie Casino', 'Delta Casino', 'Echo Casino', 'Foxtrot Casino', 'Golf Casino', 'Hotel Casino', 'India Casino', 'Juliet Casino'],
     th: ['Stake', 'รูเบท', 'อัลฟ่าคาสิโน', 'Bravo Casino', 'Charlie Casino', 'Delta Casino', 'Echo Casino', 'Foxtrot Casino', 'Golf Casino', 'Hotel Casino', 'India Casino', 'Juliet Casino'],
   };
-  /** The caption built independently of the code under test. */
-  const expectedCaption = (locale: Locale, intro: string, page: number, title = t('rankings.topOverall', { count: 12 }, locale)) => {
-    const first = (page - 1) * 5;
-    const lines = RANKED.slice(first, first + 5).map(([, rating], index) =>
-      `${first + index + 1}. ${NAMES[locale][first + index]} (${formatRating(rating, locale)})`);
-    return [intro ? `${intro}\n\n${title}` : title, ...lines].join('\n');
+  /** Banner caption: overall is the intro, or the built-in title when it is empty. A category adds its title. */
+  const expectedCaption = (locale: Locale, intro: string, categoryTitle?: string) => {
+    if (categoryTitle) return intro ? `${intro}\n\n${categoryTitle}` : categoryTitle;
+    return intro || t('rankings.topOverall', { count: 12 }, locale);
   };
   const pageKeyboard = (page: number, category?: string) => {
     const first = (page - 1) * 5;
@@ -91,8 +88,8 @@ import {
   const thUser: User = { id: 3003, language_code: 'en' };
   const rankings = (user: User, args = '', chatType = 'private') =>
     send(textUpdate(user, args ? `/rankings ${args}` : '/rankings', chatType));
-  const tap = (user: User, data: string, media?: 'photo' | 'animation' | 'video', chatType?: string) =>
-    send(tapUpdate(user, data, { media, chatType }));
+  const tap = (user: User, data: string, media?: 'photo' | 'animation' | 'video', chatType?: string, caption?: string) =>
+    send(tapUpdate(user, data, { media, chatType, caption }));
 
   const warnings: string[] = [];
   const realWarn = console.warn;
@@ -133,7 +130,7 @@ import {
     const out = sent(at);
     check(`${type}: one ${method} with the URL, the caption and today's buttons; no text message`,
       out.length === 1 && out[0].method === method && out[0].payload[type] === url &&
-      out[0].payload.caption === expectedCaption('en', 'Our top picks this week!', 1) && same(shape(out[0]), pageKeyboard(1)) &&
+      out[0].payload.caption === expectedCaption('en', 'Our top picks this week!') && same(shape(out[0]), pageKeyboard(1)) &&
       plain(out[0]), out.map((c) => [c.method, c.payload.caption]));
   }
   console.log(`  caption (en):\n${sent(at)[0].payload.caption.replace(/^/gm, '    | ')}`);
@@ -142,12 +139,28 @@ import {
   setBanner('en', banner('Our top picks this week!', PHOTO, 'photo'));
   at = await send(textUpdate(enUser, `🏆 ${en.keyboard.rankings}`));
   check('the menu button sends the banner too', sent(at).length === 1 && MEDIA_SENDS.includes(sent(at)[0].method) &&
-    sent(at)[0].payload.caption === expectedCaption('en', 'Our top picks this week!', 1), sent(at).map((c) => c.method));
+    sent(at)[0].payload.caption === expectedCaption('en', 'Our top picks this week!'), sent(at).map((c) => c.method));
 
   console.log('\n== Empty intro: the built-in title line only ==');
   setBanner('en', banner('', PHOTO, 'photo'));
   at = await rankings(enUser);
-  check('caption is the title and the casino lines', sent(at)[0]?.payload.caption === expectedCaption('en', '', 1), sent(at)[0]?.payload.caption);
+  check('overall, empty intro: the built-in title only, no casino lines', sent(at)[0]?.payload.caption === expectedCaption('en', '') &&
+    sent(at)[0].payload.caption === 'Top 12 casinos overall:' && !sent(at)[0].payload.caption.includes('Stake') &&
+    same(shape(sent(at)[0]), pageKeyboard(1)), sent(at)[0]?.payload.caption);
+  at = await rankings(enUser, 'crypto');
+  check('category, empty intro: the category title only', sent(at)[0]?.payload.caption ===
+    t('rankings.topCategory', { count: 12, categoryName: 'Crypto Casinos' }, 'en') &&
+    same(shape(sent(at)[0]), pageKeyboard(1, 'crypto')), sent(at)[0]?.payload.caption);
+  for (const [user, locale, categoryName] of [
+    [zhUser, 'zh', '加密货币娱乐场'], [thUser, 'th', 'Crypto Casinos'],
+  ] as const) {
+    setBanner(locale, banner('', locale === 'zh' ? ZH_PHOTO : TH_PHOTO, 'photo'));
+    at = await rankings(user);
+    check(`${locale} overall, empty intro: the built-in title only`, sent(at)[0]?.payload.caption === expectedCaption(locale, ''));
+    at = await rankings(user, 'crypto');
+    check(`${locale} category, empty intro: the category title only`, sent(at)[0]?.payload.caption ===
+      t('rankings.topCategory', { count: 12, categoryName }, locale));
+  }
 
   console.log('\n== Languages and the English fallback ==');
   setBanner('en', banner('English intro', PHOTO, 'photo'));
@@ -158,15 +171,23 @@ import {
   ] as const) {
     at = await rankings(user);
     const out = sent(at)[0];
-    check(`${locale}: its own banner, caption and buttons in ${locale}`, isFrom(out, url) &&
-      out.payload.caption === expectedCaption(locale, intro, 1) &&
+    check(`${locale}: its own banner, intro-only caption, and buttons in ${locale}`, isFrom(out, url) &&
+      out.payload.caption === expectedCaption(locale, intro) &&
+      out.payload.reply_markup.inline_keyboard[0][0].text === `1. ${NAMES[locale][0]}` &&
       out.payload.reply_markup.inline_keyboard.at(-1)[0].text === `▶️ ${({ en, zh, th })[locale].buttons.next}`, out?.payload.caption);
     console.log(`  caption (${locale}):\n${out?.payload.caption.replace(/^/gm, '    | ')}`);
+    at = await rankings(user, 'crypto');
+    const categoryName = locale === 'zh' ? '加密货币娱乐场' : 'Crypto Casinos';
+    const categoryTitle = t('rankings.topCategory', { count: 12, categoryName }, locale);
+    check(`${locale} category with intro: intro, then the category title`, sent(at)[0]?.payload.caption ===
+      expectedCaption(locale, intro, categoryTitle), sent(at)[0]?.payload.caption);
+    console.log(`  caption (${locale} category):\n${sent(at)[0]?.payload.caption.replace(/^/gm, '    | ')}`);
   }
   setBanner('zh', undefined);
   at = await rankings(zhUser);
-  check('Chinese not set: the English banner and intro, with the Chinese title, names and buttons',
-    isFrom(sent(at)[0], PHOTO) && sent(at)[0].payload.caption === expectedCaption('zh', 'English intro', 1), sent(at)[0]?.payload.caption);
+  check('Chinese not set: the English banner and intro, with Chinese casino buttons',
+    isFrom(sent(at)[0], PHOTO) && sent(at)[0].payload.caption === expectedCaption('zh', 'English intro') &&
+    sent(at)[0].payload.reply_markup.inline_keyboard[0][0].text === `1. ${NAMES.zh[0]}`, sent(at)[0]?.payload.caption);
   setBanner('zh', '{"introText": "broken"');
   at = await rankings(zhUser);
   check('Chinese invalid: the English banner', isFrom(sent(at)[0], PHOTO));
@@ -202,58 +223,51 @@ import {
   at = await rankings(enUser);
   check('http media URL in the database: the text ranking', same(sent(at)[0]?.payload, baseline.en.payload));
 
-  console.log('\n== Caption limit ==');
-  const casinosOf = (names: string[]) => names.map((name, index) => ({ slug: `c${index}`, name, overallRating: 4.5 - index / 10 }));
-  const intro300 = `Intro ${'z'.repeat(294)}`;
-  const longNames = casinosOf(Array.from({ length: 5 }, (_, i) => `Casino ${i + 1} ${'with an extremely long name '.repeat(12)}`));
-  let caption = formatCaption(intro300, 'Top 12 casinos overall:', longNames, 1, 'en');
-  check('300-character intro and five very long names: within 1024, intro and title intact, five lines, names cut with "…"',
-    caption.length <= 1024 && caption.startsWith(`${intro300}\n\nTop 12 casinos overall:\n`) && caption.split('\n').length === 8 &&
-    caption.split('\n').slice(3).every((line, i) => line.startsWith(`${i + 1}. Casino ${i + 1}`) && line.includes('…') && /\(\d\.\d\/5\)$/.test(line)),
-    { length: caption.length, caption });
-  const exact = formatCaption('', 'T', casinosOf(['a'.repeat(1024 - 'T\n1.  (4.5/5)'.length)]), 1, 'en');
-  check('a caption of exactly 1024 is left whole', exact.length === 1024 && !exact.includes('…'), exact.length);
-  const oneOver = formatCaption('', 'T', casinosOf(['a'.repeat(1025 - 'T\n1.  (4.5/5)'.length)]), 1, 'en');
-  check('one character over: the name is cut, still 1024 or less', oneOver.length <= 1024 && oneOver.includes('…'), oneOver.length);
-  const hugeTitle = `Top 12 casinos in ${'Very Long Category '.repeat(36)}:`;
-  caption = formatCaption(intro300, hugeTitle, longNames, 1, 'en');
-  check('header leaves room for fewer lines: extra lines dropped from the bottom, intro kept, within 1024',
-    caption.length <= 1024 && caption.startsWith(intro300) && caption.split('\n').length < 8, { length: caption.length, lines: caption.split('\n').length });
-  caption = formatCaption(intro300, 'X'.repeat(720), longNames, 1, 'en');
-  check('no room for any line: intro and title only', caption === `${intro300}\n\n${'X'.repeat(720)}`, caption.length);
-  caption = formatCaption('', 'Top', casinosOf(Array.from({ length: 5 }, () => '😀'.repeat(300))), 1, 'zh');
-  check('emoji names: within 1024, no broken surrogate', caption.length <= 1024 && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(caption), caption.length);
-  check('short captions are untouched', formatCaption('Hi', 'Top', casinosOf(['A', 'B']), 1, 'en') === 'Hi\n\nTop\n1. A (4.5/5)\n2. B (4.4/5)');
-
   console.log('\n== Previous / Next ==');
   setBanner('en', banner('Banner intro', PHOTO, 'photo'));
+  const bannerCaption = expectedCaption('en', 'Banner intro');
   for (const media of ['photo', 'animation', 'video'] as const) {
-    at = await tap(enUser, 'k:2', media);
+    at = await tap(enUser, 'k:2', media, undefined, bannerCaption);
     const out = edits(at);
-    check(`${media} message, Next: editMessageCaption with page 2 and its buttons; nothing sent, the media stays`,
-      out.length === 1 && out[0].method === 'editMessageCaption' && out[0].payload.caption === expectedCaption('en', 'Banner intro', 2) &&
-      same(shape(out[0]), pageKeyboard(2)) && sent(at).length === 0 && plain(out[0]) &&
-      !calls.slice(at).some((c) => c.method === 'editMessageMedia') && answers(at).length === 1, out.map((c) => c.method));
+    check(`${media} message, Next: editMessageReplyMarkup with page 2 buttons; the caption is not edited`,
+      out.length === 1 && out[0].method === 'editMessageReplyMarkup' && out[0].payload.caption === undefined &&
+      same(shape(out[0]), pageKeyboard(2)) && sent(at).length === 0 &&
+      !calls.slice(at).some((c) => c.method === 'editMessageCaption' || c.method === 'editMessageMedia') &&
+      answers(at).length === 1, out.map((c) => c.method));
   }
-  at = await tap(enUser, 'k:1', 'photo');
-  check('media message, Previous: back to page 1', edits(at)[0]?.payload.caption === expectedCaption('en', 'Banner intro', 1) &&
-    same(shape(edits(at)[0]), pageKeyboard(1)));
-  at = await tap(enUser, 'k:3', 'photo');
-  check('media message, last page: Previous only', same(shape(edits(at)[0]), pageKeyboard(3)) &&
-    edits(at)[0].payload.caption.endsWith('12. Juliet Casino (3.2/5)'));
+  at = await tap(enUser, 'k:1', 'photo', undefined, bannerCaption);
+  check('media message, Previous: page 1 buttons only', edits(at)[0]?.method === 'editMessageReplyMarkup' &&
+    edits(at)[0].payload.caption === undefined && same(shape(edits(at)[0]), pageKeyboard(1)));
+  at = await tap(enUser, 'k:3', 'photo', undefined, bannerCaption);
+  check('media message, last page: Previous only', edits(at)[0]?.method === 'editMessageReplyMarkup' &&
+    same(shape(edits(at)[0]), pageKeyboard(3)));
   at = await tap(enUser, 'k:2');
   check('old text message (banner now set), Next: editMessageText exactly as before', edits(at).length === 1 &&
     same(edits(at)[0].payload, baselinePage2.payload), edits(at)[0]?.method);
 
   console.log('\n== Tap a casino, then Back ==');
-  at = await tap(enUser, 'kr:2:delta-casino', 'photo');
+  const cardCaption = (name: string, slug: string, rating: string) =>
+    `${name}\nRating: ${rating}\nLicense: ${en.search.noLicenses}\n${casinoUrl(slug, 'en')}`;
+  at = await tap(enUser, 'kr:1:stake', 'photo');
   let edit = edits(at)[0];
-  check('media message: the caption becomes the card, the buttons the card buttons with Back to page 2', edits(at).length === 1 &&
-    edit.method === 'editMessageCaption' && edit.payload.caption === `Delta Casino\nRating: 3.8/5\nLicense: ${en.search.noLicenses}\n${casinoUrl('delta-casino', 'en')}` &&
+  const stakeCard = `Stake\nRating: 4.6/5\nLicense: Curaçao\n${casinoUrl('stake', 'en')}`;
+  check('page 1 media: the caption becomes the card, Back goes to page 1', edits(at).length === 1 &&
+    edit.method === 'editMessageCaption' && edit.payload.caption === stakeCard &&
+    same(shape(edit), [['kv:1:stake', casinoUrl('stake', 'en')], ['cp:stake'], ['k:1']]) && sent(at).length === 0,
+    [edit?.payload.caption, shape(edit)]);
+  at = await tap(enUser, 'k:1', 'photo', undefined, stakeCard);
+  check('page 1 media, Back: the ranking caption and page 1 buttons', edits(at)[0]?.method === 'editMessageCaption' &&
+    edits(at)[0].payload.caption === bannerCaption && same(shape(edits(at)[0]), pageKeyboard(1)));
+  at = await tap(enUser, 'kr:2:delta-casino', 'photo');
+  edit = edits(at)[0];
+  const deltaCard = cardCaption('Delta Casino', 'delta-casino', '3.8/5');
+  check('page 2 media: the caption becomes the card, Back goes to page 2', edits(at).length === 1 &&
+    edit.method === 'editMessageCaption' && edit.payload.caption === deltaCard &&
     same(shape(edit), [['kv:2:delta-casino', casinoUrl('delta-casino', 'en')], ['cp:delta-casino'], ['k:2']]) && sent(at).length === 0,
     [edit?.payload.caption, shape(edit)]);
-  at = await tap(enUser, 'k:2', 'photo');
-  check('media message, Back: the caption is page 2 again', edits(at)[0]?.payload.caption === expectedCaption('en', 'Banner intro', 2));
+  at = await tap(enUser, 'k:2', 'photo', undefined, deltaCard);
+  check('page 2 media, Back: the ranking caption and page 2 buttons', edits(at)[0]?.method === 'editMessageCaption' &&
+    edits(at)[0].payload.caption === bannerCaption && same(shape(edits(at)[0]), pageKeyboard(2)));
   at = await tap(enUser, 'kr:2:delta-casino');
   edit = edits(at)[0];
   check('text message: the card by editMessageText, as today', edit?.method === 'editMessageText' &&
@@ -275,12 +289,12 @@ import {
   console.log('\n== Categories ==');
   at = await rankings(enUser, 'crypto');
   const cryptoTitle = t('rankings.topCategory', { count: 12, categoryName: 'Crypto Casinos' }, 'en');
-  check('/rankings crypto: the banner, the category title in the caption, category buttons', sent(at)[0]?.method === 'sendPhoto' &&
-    sent(at)[0].payload.caption === expectedCaption('en', 'Banner intro', 1, cryptoTitle) && same(shape(sent(at)[0]), pageKeyboard(1, 'crypto')),
+  check('/rankings crypto: the intro, then the category title, and category buttons', sent(at)[0]?.method === 'sendPhoto' &&
+    sent(at)[0].payload.caption === expectedCaption('en', 'Banner intro', cryptoTitle) && same(shape(sent(at)[0]), pageKeyboard(1, 'crypto')),
     sent(at)[0]?.payload.caption);
-  at = await tap(enUser, 'k:2:crypto', 'photo');
-  check('media message, category Next: caption page 2 of the category', edits(at)[0]?.payload.caption === expectedCaption('en', 'Banner intro', 2, cryptoTitle) &&
-    same(shape(edits(at)[0]), pageKeyboard(2, 'crypto')));
+  at = await tap(enUser, 'k:2:crypto', 'photo', undefined, expectedCaption('en', 'Banner intro', cryptoTitle));
+  check('media message, category Next: page 2 buttons only', edits(at)[0]?.method === 'editMessageReplyMarkup' &&
+    edits(at)[0].payload.caption === undefined && same(shape(edits(at)[0]), pageKeyboard(2, 'crypto')));
   at = await tap(enUser, 'kr:2:delta-casino:crypto', 'photo');
   check('category card on a media message: Back to the category page', same(shape(edits(at)[0])?.at(-1), ['k:2:crypto']));
   at = await rankings(enUser, 'no-such-category');
@@ -300,11 +314,18 @@ import {
   setBanner('en', undefined);
   at = await tap(enUser, 'k:2', 'photo');
   check('banner removed since: its buttons still page, with the built-in caption', edits(at)[0]?.method === 'editMessageCaption' &&
-    edits(at)[0].payload.caption === expectedCaption('en', '', 2));
+    edits(at)[0].payload.caption === expectedCaption('en', ''));
   notModifiedMethods.add('editMessageCaption');
   at = await tap(enUser, 'k:2', 'photo');
   check('"message is not modified" on a caption: ignored, nothing sent, the tap answered without an error', sent(at).length === 0 &&
     answers(at).length === 1 && answers(at)[0].payload.text === undefined);
+  notModifiedMethods.clear();
+  setBanner('en', banner('Banner intro', PHOTO, 'photo'));
+  notModifiedMethods.add('editMessageReplyMarkup');
+  at = await tap(enUser, 'k:2', 'photo', undefined, expectedCaption('en', 'Banner intro'));
+  check('"message is not modified" on a page change: ignored, nothing sent, the caption is not edited', sent(at).length === 0 &&
+    answers(at).length === 1 && answers(at)[0].payload.text === undefined &&
+    !calls.slice(at).some((c) => c.method === 'editMessageCaption'));
   notModifiedMethods.clear();
   notModifiedMethods.add('editMessageText');
   at = await tap(enUser, 'k:2');
@@ -378,11 +399,12 @@ import {
   setBanner('en', banner('Group intro', PHOTO, 'photo'));
   const groupUser: User = { id: 3100, language_code: 'en' };
   at = await rankings(groupUser, '', 'supergroup');
+  const groupCaption = expectedCaption('en', 'Group intro');
   check('group /rankings: the banner with 5 casinos and Next', sent(at)[0]?.method === 'sendPhoto' &&
-    sent(at)[0].payload.caption === expectedCaption('en', 'Group intro', 1) && same(shape(sent(at)[0]), pageKeyboard(1)));
-  at = await tap(groupUser, 'k:2', 'photo', 'supergroup');
-  check('group Next on the banner: caption edit', edits(at)[0]?.method === 'editMessageCaption' &&
-    edits(at)[0].payload.caption === expectedCaption('en', 'Group intro', 2));
+    sent(at)[0].payload.caption === groupCaption && same(shape(sent(at)[0]), pageKeyboard(1)));
+  at = await tap(groupUser, 'k:2', 'photo', 'supergroup', groupCaption);
+  check('group Next on the banner: buttons only', edits(at)[0]?.method === 'editMessageReplyMarkup' &&
+    edits(at)[0].payload.caption === undefined && same(shape(edits(at)[0]), pageKeyboard(2)));
   at = await tap(groupUser, 'kr:2:delta-casino', 'photo', 'supergroup');
   check('group card on the banner: complaint is the deep link, as before', same(shape(edits(at)[0])?.[1], ['https://t.me/offline_bot?start=complaint_delta-casino']));
   const spammer: User = { id: 3101, language_code: 'en' };

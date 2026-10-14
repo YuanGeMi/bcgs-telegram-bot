@@ -27,7 +27,7 @@ export function clipText(text: string, max: number): string {
   return `${cut.trimEnd()}…`;
 }
 
-/** True for a photo, GIF or video message, whose text is a caption (edited with editMessageCaption). */
+/** True for a photo, GIF or video message, whose text is a caption. */
 export function isMediaMessage(message: unknown): boolean {
   if (!message || typeof message !== 'object') return false;
   return 'photo' in message || 'animation' in message || 'video' in message;
@@ -152,17 +152,26 @@ export async function sendScreen(ctx: BotContext, screen: Screen): Promise<void>
   });
 }
 
+function messageCaption(message: unknown): string | undefined {
+  if (!message || typeof message !== 'object' || !('caption' in message)) return undefined;
+  const caption = (message as { caption?: unknown }).caption;
+  return typeof caption === 'string' ? caption : undefined;
+}
+
 /**
  * Replaces the tapped message with `screen`: the caption of a media message (the media stays), else the text.
+ * A media message whose caption is already the new one only gets new buttons.
  * Sends it as a new text message if the old one can't be edited.
  */
 export async function editScreen(ctx: BotContext, screen: Screen): Promise<void> {
   try {
     if (isMediaMessage(ctx.callbackQuery?.message)) {
-      await ctx.editMessageCaption({
-        caption: screen.caption ?? clipText(screen.text, CAPTION_MAX),
-        reply_markup: screen.keyboard,
-      });
+      const caption = screen.caption ?? clipText(screen.text, CAPTION_MAX);
+      if (messageCaption(ctx.callbackQuery?.message) === caption) {
+        await ctx.editMessageReplyMarkup({ reply_markup: screen.keyboard });
+      } else {
+        await ctx.editMessageCaption({ caption, reply_markup: screen.keyboard });
+      }
     } else {
       await ctx.editMessageText(screen.text, {
         reply_markup: screen.keyboard,

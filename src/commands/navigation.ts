@@ -58,7 +58,7 @@ export function registerNavigation(bot: Bot<BotContext>) {
         return;
       }
 
-      // Buttons on the rankings banner edit its caption; the same buttons on an older text message edit the text.
+      // Buttons on the rankings banner edit its caption, or only its buttons when the caption stays; the same buttons on an older text message edit the text.
       const onMedia = isMediaMessage(ctx.callbackQuery.message);
       if (action.kind === 'cardReview' && onMedia) {
         // A review doesn't fit in a caption: it goes out as a new message below the banner, which stays as it is.

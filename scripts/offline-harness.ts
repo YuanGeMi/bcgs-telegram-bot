@@ -243,13 +243,13 @@ export function textUpdate(user: User, text: string, chatType = 'private'): Upda
     },
   } as unknown as Update;
 }
-type TapOptions = { chatType?: string; replyToText?: string; messageId?: number; media?: 'photo' | 'animation' | 'video' };
+type TapOptions = { chatType?: string; replyToText?: string; messageId?: number; media?: 'photo' | 'animation' | 'video'; caption?: string };
 
-function messageBody(media: TapOptions['media']) {
+function messageBody(media: TapOptions['media'], caption = 'bot caption') {
   const file = { file_id: 'fid-on-screen', file_unique_id: 'u', width: 1, height: 1, duration: 1 };
-  if (media === 'photo') return { photo: [file], caption: 'bot caption' };
-  if (media === 'animation') return { animation: file, document: file, caption: 'bot caption' };
-  if (media === 'video') return { video: file, caption: 'bot caption' };
+  if (media === 'photo') return { photo: [file], caption };
+  if (media === 'animation') return { animation: file, document: file, caption };
+  if (media === 'video') return { video: file, caption };
   return { text: 'bot message' };
 }
 
@@ -261,7 +261,7 @@ export function tapUpdate(user: User, data: string, options: TapOptions = {}): U
     callback_query: {
       id: `cb${updateId}`, chat_instance: 'ci', data, from: fromOf(user),
       message: {
-        message_id: options.messageId ?? 4242, date: 0, chat, ...messageBody(options.media),
+        message_id: options.messageId ?? 4242, date: 0, chat, ...messageBody(options.media, options.caption),
         ...(options.replyToText
           ? { reply_to_message: { message_id: 4100, date: 0, chat, from: fromOf(user), text: options.replyToText } }
           : {}),

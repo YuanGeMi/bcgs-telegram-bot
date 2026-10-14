@@ -90,7 +90,6 @@ const th: Messages = {
     topCategory: 'คาสิโน {count} อันดับแรกใน {categoryName}:',
     rankedCasino: '{rank}. {name} ({rating})\n   {url}',
     list: '{title}\n\n{entries}',
-    bannerLine: '{rank}. {name} ({rating})',
   },
   links: {
     title: '🔗 ลิงก์ BC.GS',
